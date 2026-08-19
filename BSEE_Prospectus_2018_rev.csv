@@ -1,0 +1,75 @@
+Year,Term,CourseCode,CourseTitle,Units,LecHoursPerWeek,LabHoursPerWeek
+First Year,First Semester,MAT060,Calculus with Analytical Geometry 1,4,4,0
+First Year,First Semester,CHM012,Chemistry for Engineers,3,3,0
+First Year,First Semester,CHM012.1,Chemistry for Engineers Laboratory,1,0,3
+First Year,First Semester,ENS150.2,Engineering Graphics,2,0,6
+First Year,First Semester,GEC104,Mathematics in the Modern World,3,3,0
+First Year,First Semester,GEC101,Understanding the Self,3,3,0
+First Year,First Semester,GEC105,Readings in Philippine History,3,3,0
+First Year,First Semester,NST001,National Service Training Program 1,-3,3,0
+First Year,First Semester,PED001,Exercise Prescription and Management,2,2,0
+First Year,Second Semester,MAT070,Calculus with Analytical Geometry 2,4,4,0
+First Year,Second Semester,PHY052,Physics for Engineers,3,3,0
+First Year,Second Semester,PHY052.1,Physics for Engineers Laboratory,1,0,3
+First Year,Second Semester,EEE100,Basic Programming for Electrical Engineering,1,0,3
+First Year,Second Semester,GEC102,Purposive Communication,3,3,0
+First Year,Second Semester,GEC109,Life and Works of Rizal,3,3,0
+First Year,Second Semester,FIL103,Inobasyon sa Wikang Filipino,3,3,0
+First Year,Second Semester,NST002,National Service Training Program 2,-3,3,0
+First Year,Second Semester,PED002,Dance/Martial Arts,2,2,0
+First Year,Second Semester,FPE101,Fundamentals of Peace Education,3,3,0
+Second Year,First Semester,ENS181,Engineering Mathematics,3,3,0
+Second Year,First Semester,EEE130,Electrical Circuit Theory 1,3,3,0
+Second Year,First Semester,EEE130.1,Electrical Circuit Theory 1 Laboratory,1,0,3
+Second Year,First Semester,ENS161,Statics of Rigid Bodies,3,3,0
+Second Year,First Semester,GEC106,Art Appreciation,3,3,0
+Second Year,First Semester,GEC107,Ethics,3,3,0
+Second Year,First Semester,MEC121,General Thermodynamics and Heat Transfer,3,3,0
+Second Year,First Semester,ENS185,Engineering Data Analysis,3,3,0
+Second Year,First Semester,PED003,Individual/Dual Sports/Traditional/ Recreational Games,2,2,0
+Second Year,Second Semester,EEE101,Engineering Mathematics for Electrical Engineering,3,3,0
+Second Year,Second Semester,ENS162,Dynamics of Rigid Bodies,3,3,0
+Second Year,Second Semester,ENS164,Mechanics of Deformable Bodies,3,3,0
+Second Year,Second Semester,EEE132,Electrical Circuit Theory 2,3,3,0
+Second Year,Second Semester,EEE132.1,Electrical Circuit Theory 2 Laboratory,1,0,3
+Second Year,Second Semester,EEE134,Electronic Circuits: Devices and Analysis,3,3,0
+Second Year,Second Semester,EEE134.1,Electronic Circuits: Devices and Analysis Laboratory,1,0,3
+Second Year,Second Semester,EEE136,Engineering Electromagnetics,3,3,0
+Second Year,Second Semester,EEE192,"Electrical Engineering Law, Codes, and Professional Ethics",2,2,0
+Second Year,Second Semester,PED004,Team Sports,2,2,0
+Third Year,First Semester,EEE102,Numerical Methods and Analysis for Electrical Engineering,3,2,3
+Third Year,First Semester,EEE180,Logic Circuits and Switching Theory,3,3,0
+Third Year,First Semester,EEE180.1,Logic Circuits and Switching Theory Laboratory,1,0,3
+Third Year,First Semester,ENS191,Engineering Economy,3,3,0
+Third Year,First Semester,EEE176,Industrial Electronics,3,3,0
+Third Year,First Semester,EEE176.1,Industrial Electronics Laboratory,1,0,3
+Third Year,First Semester,EEE186,Fundamentals of Electronic Communications,3,3,0
+Third Year,First Semester,EEE193,Electrical Standards and Practices,1,0,3
+Third Year,First Semester,EEE146,Electrical Machines 1,2,2,0
+Third Year,Second Semester,ENS190,Basic Occupational Safety and Health,3,3,0
+Third Year,Second Semester,EEE184,"Microprocessor, Microcontroller Systems and Design",3,3,0
+Third Year,Second Semester,EEE184.1,"Microprocessor, Microcontroller Systems and Design Laboratory",1,0,3
+Third Year,Second Semester,EEE144,Electrical Apparatus and Devices,2,2,0
+Third Year,Second Semester,EEE144.1,Electrical Apparatus and Devices Laboratory,1,0,3
+Third Year,Second Semester,EEE148,Electrical Machines 2,3,3,0
+Third Year,Second Semester,EEE148.1,Electrical Machines 2 Laboratory,1,0,3
+Third Year,Second Semester,HIS003,History of Filipino Muslims and Indigenous Peoples of MINSUPALA,3,3,0
+Third Year,Second Semester,FIL101,Wika at Kultura sa Mapayapang Lipunan,3,3,0
+Third Year,Second Semester,EEE160,Feedback and Control Systems,3,3,0
+Third Year,Second Semester,EEE160.1,Feedback and Control Systems Laboratory,1,0,3
+Third Year,Summer Term,EEE197,On-the-Job Training,3,0,240
+Third Year,Summer Term,ENS167,Fundamentals of Materials Science and Engineering,3,3,0
+Fourth Year,First Semester,ENS165,Mechanics of Fluids,3,3,0
+Fourth Year,First Semester,EEE150,Power System Analysis,3,3,0
+Fourth Year,First Semester,EEE150.1,Power System Analysis Laboratory,1,0,3
+Fourth Year,First Semester,EEE198,Research Methods,1,0,3
+Fourth Year,First Semester,EEE103,Management of Engineering Projects,2,2,0
+Fourth Year,First Semester,EEE178,Instrumentation and Control,3,3,0
+Fourth Year,First Semester,EEE178.1,Instrumentation and Control Laboratory,1,0,3
+Fourth Year,Second Semester,GEC103,The Contemporary World,3,3,0
+Fourth Year,Second Semester,GEC108,"Science, Technology and Society",3,3,0
+Fourth Year,Second Semester,EEE158,Electrical Systems and Illumination Engineering Design,3,3,0
+Fourth Year,Second Semester,EEE158.2,"Electrical Systems and Illumination Engineering Design Laboratory2 0 6 6 EEE148, EEE148.1 EEE158 Elective 2 (Technical Elective 2)",3,3,0
+Fourth Year,Second Semester,EEE199,Undergraduate Thesis,1,0,3
+Fourth Year,Second Semester,EEE196,Seminars/Colloquia,1,0,3
+Fourth Year,Second Semester,ENS193,Technopreneurship for Engineers and Technologists,3,3,0

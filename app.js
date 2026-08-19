@@ -1,0 +1,2702 @@
+(function(){
+"use strict";
+
+/* ---------------------------------------------------------------------
+   CONSTANTS
+--------------------------------------------------------------------- */
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const DAY_FULL = {Mon:"Monday",Tue:"Tuesday",Wed:"Wednesday",Thu:"Thursday",Fri:"Friday",Sat:"Saturday",Sun:"Sunday"};
+const START_MIN = 7*60+30;   // 7:30 AM — hard outer bound; no room can open earlier
+const END_MIN   = 21*60;     // 9:00 PM — hard outer bound; no room can stay open later
+const SLOT_LEN  = 30;        // minutes
+const SLOT_TIMES = (function(){
+  const arr=[];
+  for(let t=START_MIN;t<END_MIN;t+=SLOT_LEN) arr.push(t);
+  return arr;
+})();
+const NUM_SLOTS = SLOT_TIMES.length; // 27
+
+// Every room defaults to open the full 7:30 AM–9:00 PM window unless custom hours are
+// specified — which can only narrow that window (later open, earlier close), never widen
+// it past these same outer bounds, at creation or later via "Edit Availability".
+const DEFAULT_OPEN_MIN = START_MIN;
+const DEFAULT_CLOSE_MIN = END_MIN;
+
+const COLORS = ["#7a1f33","#4a5568","#b3791f","#3d6b4f","#6b3fa0","#8c2f45","#2f6690",
+                "#a0522d","#5a6b1f","#9c4a6a","#3a4a5c","#b0651f","#4a7a6b","#6b2f4a"];
+
+// Preferred paired-day combinations for split 3-hour subjects (1.5h x2), in priority order.
+const DAY_PAIRS = { MW:["Mon","Wed"], TTh:["Tue","Thu"], FSa:["Fri","Sat"] };
+const DAY_PAIR_ORDER = ["MW","TTh","FSa"];
+const DAY_PAIR_LABELS = { AUTO:"Auto (best available)", MW:"Mon & Wed", TTh:"Tue & Thu", FSa:"Fri & Sat" };
+
+// Sentinel "room" for External-Assignment subjects — no real room is booked (handled by
+// another college/department), so these get a placeholder id/name instead of a real roomId,
+// and are excluded from room double-booking checks (multiple external subjects legitimately
+// can share the same day/time since none of them occupy a physical room).
+const TBA_ROOM_ID = "__TBA__";
+const TBA_ROOM_NAME = "TBA / External (No Room)";
+
+// The Target Semester picker is always exactly these 3 real-world terms — selecting one
+// loads every uploaded program's courses for that term at once (see autoPopulateSubjectsForTerm),
+// so multiple degree programs can be scheduled together in one optimization run.
+const PROSPECTUS_TERMS = ["First Semester", "Second Semester", "Summer Term"];
+
+// Canonicalizes a Term value coming from CSV/PDF import into exactly one of PROSPECTUS_TERMS
+// whenever it's a recognizable variant (different casing, "1st"/"2nd" instead of
+// "First"/"Second", stray whitespace, "Summer" alone, etc.) — Target Semester selection and
+// cohort grouping both compare terms with strict equality, so a course whose Term didn't
+// exactly match one of the 3 fixed strings would otherwise never be found by either, with no
+// error to explain why. Returns the trimmed original text unchanged if nothing recognizable
+// matches, so unrecognized values are still visible in the Prospectus list rather than lost.
+function normalizeTermValue(raw){
+  const s = String(raw||"").trim().replace(/\s+/g, " ");
+  const low = s.toLowerCase();
+  if(/^(first|1st)\b/.test(low) && /semester/.test(low)) return "First Semester";
+  if(/^(second|2nd)\b/.test(low) && /semester/.test(low)) return "Second Semester";
+  if(/summer/.test(low)) return "Summer Term";
+  return s;
+}
+
+function fmtTime(mins){
+  let h = Math.floor(mins/60), m = mins%60;
+  const ampm = h>=12 ? "PM":"AM";
+  let h12 = h%12; if(h12===0) h12=12;
+  return h12+":"+(m<10?"0"+m:m)+" "+ampm;
+}
+function slotLabel(i){ return fmtTime(SLOT_TIMES[i]); }
+function genId(prefix){ return prefix+"_"+Math.random().toString(36).slice(2,9)+Date.now().toString(36); }
+// Builds a fresh weekly availability grid. With no arguments, every day is open for the
+// full 7:30 AM–9:00 PM window. Pass openMin/closeMin (minutes from midnight) to open a room
+// for a narrower custom range within those same fixed outer bounds instead — a room can
+// never open earlier than 7:30 AM or stay open later than 9:00 PM.
+function makeAvailability(openMin, closeMin){
+  const from = openMin==null ? DEFAULT_OPEN_MIN : openMin;
+  const to = closeMin==null ? DEFAULT_CLOSE_MIN : closeMin;
+  const av={};
+  DAYS.forEach(d=> av[d] = SLOT_TIMES.map(t => t>=from && t<to));
+  return av;
+}
+
+/* ---------------------------------------------------------------------
+   STATE
+--------------------------------------------------------------------- */
+let state = {
+  rooms: [],
+  subjects: [],
+  faculty: [], // [{id, name, subjectIds:[...]}]
+  prospectus: [], // [{id, year, yearLabel, term, code, title, units, lec, lab}]
+  targetTerm: "", // "<yearLabel>|<term>" — the regular-student cohort the optimizer keeps conflict-free
+  schedule: null // {assignments:[...], unscheduled:[...], stats:{...}}
+};
+
+function saveState(){
+  try{ localStorage.setItem("rms_state_v1", JSON.stringify(state)); }catch(e){ /* ignore quota errors */ }
+}
+// Room availability arrays saved under a different slot grid (either this app's original
+// fixed 7:30 AM–9:00 PM window, or a briefly-wider 6:00 AM–11:00 PM window) are the wrong
+// length for the current grid and would misalign if used as-is. Rebuild them at the current
+// slot indices, keyed by actual clock time (not raw index), so every open/closed half-hour
+// that's still within 7:30 AM–9:00 PM lands exactly where it did before. Anything that was
+// open only outside that window (e.g. 6:00–7:30 AM) can no longer be represented and is
+// dropped — those hours are no longer allowed for any room.
+function migrateLegacyAvailability(room){
+  const currentLen = room.availability && room.availability.Mon ? room.availability.Mon.length : NUM_SLOTS;
+  if(currentLen === NUM_SLOTS) return false; // already the current shape, nothing to do
+  // Infer the old grid's bounds from its slot count: 27 = the original 7:30 AM–9:00 PM
+  // window, 34 = the briefly-wider 6:00 AM–11:00 PM window. Anything else falls back to
+  // assuming it started at the current START_MIN (best effort for unexpected sizes).
+  const oldStart = currentLen === 34 ? 6*60 : START_MIN;
+  const oldSlotTimes = [];
+  for(let i=0;i<currentLen;i++) oldSlotTimes.push(oldStart + i*SLOT_LEN);
+  const migrated = {};
+  DAYS.forEach(d=>{
+    const oldArr = (room.availability && room.availability[d]) || [];
+    const newArr = new Array(NUM_SLOTS).fill(false);
+    oldArr.forEach((wasOpen, i)=>{
+      if(!wasOpen) return;
+      const clockTime = oldSlotTimes[i];
+      const newIdx = SLOT_TIMES.indexOf(clockTime);
+      if(newIdx>=0) newArr[newIdx] = true; // silently clamped away if outside 7:30 AM–9:00 PM
+    });
+    migrated[d] = newArr;
+  });
+  room.availability = migrated;
+  return true;
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem("rms_state_v1");
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(parsed && typeof parsed === "object"){
+        state.rooms = Array.isArray(parsed.rooms) ? parsed.rooms : [];
+        state.subjects = Array.isArray(parsed.subjects) ? parsed.subjects : [];
+        state.faculty = Array.isArray(parsed.faculty) ? parsed.faculty : [];
+        state.prospectus = Array.isArray(parsed.prospectus) ? parsed.prospectus : [];
+        state.targetTerm = typeof parsed.targetTerm === "string" ? parsed.targetTerm : "";
+        state.schedule = parsed.schedule || null;
+
+        let migratedAny = false;
+        state.rooms.forEach(r=>{ if(migrateLegacyAvailability(r)) migratedAny = true; });
+        if(migratedAny){
+          // Slot indices shifted, so any saved schedule's startSlot values no longer point
+          // at the right times — clear it rather than show a silently-wrong timetable. It's
+          // just re-generated by clicking Optimize again.
+          state.schedule = null;
+          saveState();
+        }
+      }
+    }
+  }catch(e){ /* ignore corrupt data */ }
+}
+loadState();
+
+/* ---------------------------------------------------------------------
+   ROOMS
+--------------------------------------------------------------------- */
+// Fills an "open from" / "open until" select pair with every valid half-hour boundary
+// across the outer 6:00 AM–11:00 PM window, defaulting to the app's standard hours.
+function populateRoomHoursSelects(fromSel, untilSel, defaultFrom, defaultUntil){
+  const from = defaultFrom==null ? DEFAULT_OPEN_MIN : defaultFrom;
+  const until = defaultUntil==null ? DEFAULT_CLOSE_MIN : defaultUntil;
+  fromSel.innerHTML = SLOT_TIMES.map(t=>
+    `<option value="${t}" ${t===from?"selected":""}>${fmtTime(t)}</option>`
+  ).join("");
+  const untilTimes = SLOT_TIMES.slice(1).concat([END_MIN]);
+  untilSel.innerHTML = untilTimes.map(t=>
+    `<option value="${t}" ${t===until?"selected":""}>${fmtTime(t)}</option>`
+  ).join("");
+}
+
+function addRoom(name, capacity, openMin, closeMin){
+  state.rooms.push({
+    id: genId("room"),
+    name: name,
+    capacity: capacity || null,
+    availability: makeAvailability(openMin, closeMin)
+  });
+  saveState();
+  renderRooms();
+}
+function deleteRoom(id){
+  if(!confirm("Delete this room? This cannot be undone.")) return;
+  state.rooms = state.rooms.filter(r=>r.id!==id);
+  saveState();
+  renderRooms();
+}
+function availableSlotCount(room){
+  let c=0;
+  DAYS.forEach(d=> room.availability[d].forEach(v=>{ if(v) c++; }));
+  return c;
+}
+
+function renderRooms(){
+  document.getElementById("badge-rooms").textContent = state.rooms.length;
+  const list = document.getElementById("room-list");
+  if(state.rooms.length===0){
+    list.innerHTML = '<div class="empty">No rooms yet. Add one above.</div>';
+    return;
+  }
+  list.innerHTML = state.rooms.map(r=>{
+    const total = DAYS.length*NUM_SLOTS;
+    const avail = availableSlotCount(r);
+    return `<div class="card" data-id="${r.id}">
+      <div class="icon">🏫</div>
+      <div class="info">
+        <div class="name">${escapeHtml(r.name)}</div>
+        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm btn-ghost" data-action="edit-avail" data-id="${r.id}">Edit Availability</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-room" data-id="${r.id}">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ---------------------------------------------------------------------
+   SUBJECTS
+--------------------------------------------------------------------- */
+function populateDurationSelect(){
+  const sel = document.getElementById("subj-duration");
+  sel.innerHTML = "";
+  for(let slots=1; slots<=8; slots++){
+    const mins = slots*SLOT_LEN;
+    const h = Math.floor(mins/60), m = mins%60;
+    let label = "";
+    if(h>0) label += h+"h";
+    if(m>0) label += (h>0?" ":"")+m+"m";
+    const opt = document.createElement("option");
+    opt.value = slots;
+    opt.textContent = label;
+    if(slots===2) opt.selected = true; // default 1h
+    sel.appendChild(opt);
+  }
+}
+
+// Builds a subject record without touching state/saving/rendering — used both by the
+// single-subject Add form and by the bulk auto-populate-from-prospectus flow (which pushes
+// many records in one pass, then saves/renders once at the end).
+function buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment){
+  const idx = state.subjects.length;
+  return {
+    id: genId("subj"),
+    name: name,
+    durationSlots: durationSlots,
+    sessionsPerWeek: sessionsPerWeek,
+    size: size || null,
+    color: COLORS[idx % COLORS.length],
+    isSplitPair: !!isSplitPair,
+    dayPairPref: isSplitPair ? (dayPairPref || "AUTO") : null,
+    type: type === "LAB" ? "LAB" : "LEC",
+    isCapacitySplit: !!isCapacitySplit,
+    prospectusCourseId: prospectusCourseId || null,
+    // External Assignment: room & faculty are handled by another college/department
+    // (e.g. NSTP, PE) — the optimizer places only the class hours (TBA room, TBD faculty)
+    // and skips room/faculty conflict-checking for this subject entirely.
+    externalAssignment: !!externalAssignment
+  };
+}
+function addSubject(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment){
+  state.subjects.push(buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment));
+  saveState();
+  renderSubjects();
+}
+function toggleSubjectExternal(id){
+  const s = state.subjects.find(x=>x.id===id);
+  if(!s) return;
+  s.externalAssignment = !s.externalAssignment;
+  saveState();
+  renderSubjects();
+}
+function deleteSubject(id){
+  if(!confirm("Delete this subject? This cannot be undone.")) return;
+  state.subjects = state.subjects.filter(s=>s.id!==id);
+  // Clean up any faculty references to the removed subject.
+  state.faculty.forEach(f=>{ f.subjectIds = f.subjectIds.filter(sid=>sid!==id); });
+  saveState();
+  renderSubjects();
+  renderFaculty();
+}
+
+function renderSubjects(){
+  document.getElementById("badge-subjects").textContent = state.subjects.length;
+  const list = document.getElementById("subject-list");
+  if(state.subjects.length===0){
+    list.innerHTML = '<div class="empty">No subjects yet. Add one above.</div>';
+    return;
+  }
+  const prospectusById = {};
+  state.prospectus.forEach(c=> prospectusById[c.id] = c);
+  list.innerHTML = state.subjects.map(s=>{
+    const mins = s.durationSlots*SLOT_LEN;
+    const h = Math.floor(mins/60), m = mins%60;
+    const durLabel = (h>0?h+"h ":"")+(m>0?m+"m":"");
+    const type = s.type === "LAB" ? "LAB" : "LEC";
+    const typeTag = `<span class="tag-${type.toLowerCase()}">${type}</span>`;
+    const scheduleMeta = s.isSplitPair
+      ? `${durLabel} × 2 &nbsp;•&nbsp; paired (${DAY_PAIR_LABELS[s.dayPairPref]}, same time)`
+      : s.isCapacitySplit
+        ? `${durLabel} × 2 identical sections &nbsp;•&nbsp; room-capacity split`
+        : `${durLabel} per session &nbsp;•&nbsp; ${s.sessionsPerWeek}x/week`;
+    const prospectusCourse = s.prospectusCourseId ? prospectusById[s.prospectusCourseId] : null;
+    const prospectusTag = prospectusCourse
+      ? ` &nbsp;•&nbsp; <span class="tag-lab">🎓 ${escapeHtml(prospectusCourse.code)}</span>`
+      : "";
+    const externalTag = s.externalAssignment
+      ? ` &nbsp;•&nbsp; <span class="tag-external">🏢 External (TBA/TBD)</span>`
+      : "";
+    return `<div class="card" data-id="${s.id}">
+      <div class="swatch" style="background:${s.color}"></div>
+      <div class="info">
+        <div class="name">${escapeHtml(s.name)} ${typeTag}</div>
+        <div class="meta">${scheduleMeta}${s.size ? " &nbsp;•&nbsp; ~"+s.size+" students" : ""}${prospectusTag}${externalTag}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm btn-ghost" data-action="toggle-external" data-id="${s.id}">${s.externalAssignment ? "Unmark External" : "Mark External"}</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-subject" data-id="${s.id}">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+  populateFacultySubjectSelect();
+}
+
+/* ---------------------------------------------------------------------
+   FACULTY
+--------------------------------------------------------------------- */
+function populateFacultySubjectSelect(){
+  const sel = document.getElementById("faculty-subjects");
+  if(!sel) return;
+  const prevSelected = new Set(Array.from(sel.selectedOptions).map(o=>o.value));
+  // External-Assignment subjects have no faculty of ours to assign (faculty is TBD, handled
+  // by another college), so they're left out of this list entirely.
+  sel.innerHTML = state.subjects.filter(s=>!s.externalAssignment).map(s=>{
+    const type = s.type === "LAB" ? "LAB" : "LEC";
+    return `<option value="${s.id}" ${prevSelected.has(s.id)?"selected":""}>[${type}] ${escapeHtml(s.name)}</option>`;
+  }).join("");
+}
+
+function addFaculty(name, subjectIds){
+  state.faculty.push({
+    id: genId("fac"),
+    name: name,
+    subjectIds: subjectIds || []
+  });
+  saveState();
+  renderFaculty();
+}
+function deleteFaculty(id){
+  if(!confirm("Delete this faculty member? This cannot be undone.")) return;
+  state.faculty = state.faculty.filter(f=>f.id!==id);
+  saveState();
+  renderFaculty();
+}
+
+function renderFaculty(){
+  const badge = document.getElementById("badge-faculty");
+  if(badge) badge.textContent = state.faculty.length;
+  const list = document.getElementById("faculty-list");
+  if(!list) return;
+  if(state.faculty.length===0){
+    list.innerHTML = '<div class="empty">No faculty yet. Add one above.</div>';
+    return;
+  }
+  const subjectById = {};
+  state.subjects.forEach(s=> subjectById[s.id]=s);
+  list.innerHTML = state.faculty.map(f=>{
+    const chips = f.subjectIds.length
+      ? f.subjectIds.map(sid=>{
+          const s = subjectById[sid];
+          if(!s) return "";
+          return `<span class="faculty-subject-chip">${escapeHtml(s.name)}</span>`;
+        }).join("")
+      : `<span style="color:var(--text-dim);font-size:12px;">No subjects listed yet — won't be conflict-checked</span>`;
+    return `<div class="card" data-id="${f.id}" style="align-items:flex-start;">
+      <div class="icon">👤</div>
+      <div class="info">
+        <div class="name">${escapeHtml(f.name)}</div>
+        <div class="meta" style="margin-top:6px;">${chips}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm btn-danger" data-action="delete-faculty" data-id="${f.id}">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* ---------------------------------------------------------------------
+   PROSPECTUS (program curriculum, used for regular-student conflict-checking)
+--------------------------------------------------------------------- */
+const YEAR_LABEL_TO_NUM = { "First Year":1, "Second Year":2, "Third Year":3, "Fourth Year":4, "Fifth Year":5 };
+
+function prospectusTermKey(course){ return course.yearLabel + "|" + course.term; }
+// Groups a course by Program + Year + Term — the full display/grouping identity used
+// throughout the Prospectus tab now that multiple degree programs can coexist.
+function prospectusGroupKey(course){ return (course.program||"General") + "|" + course.yearLabel + "|" + course.term; }
+// Duplicate-course identity: same Program + Year + Term + Code. Deliberately includes
+// Program (not just Code) — course codes like "NSTP01" or "PE1" are legitimately reused
+// across many different degree programs, and those are NOT duplicates of each other.
+function prospectusDupKey(program, yearLabel, term, code){
+  return [program, yearLabel, term, code].map(x=> String(x||"").trim().toLowerCase()).join("|");
+}
+function distinctPrograms(){
+  const seen = new Set(); const out = [];
+  state.prospectus.forEach(c=>{ const p=c.program||"General"; if(!seen.has(p)){ seen.add(p); out.push(p); } });
+  return out;
+}
+
+// subject.prospectusCourseId -> which regular-student cohort (Program + Year Level) must it
+// stay conflict-free against? Returns a Map of subjectId -> "program|yearLabel". Two subjects
+// only ever block each other if they share the SAME program AND SAME year level — different
+// programs' students (or different year levels within the same program) are different people
+// and are free to overlap. Scoped to courses in the currently-selected target TERM only (the
+// Target Semester picker), so this naturally spans every uploaded program at once.
+function buildCohortGroups(){
+  const map = {};
+  if(!state.targetTerm) return map;
+  const courseIdToGroup = {};
+  state.prospectus.forEach(c=>{
+    if(normalizeTermValue(c.term) === state.targetTerm) courseIdToGroup[c.id] = (c.program||"General") + "|" + c.yearLabel;
+  });
+  state.subjects.forEach(s=>{
+    if(s.prospectusCourseId && courseIdToGroup[s.prospectusCourseId]) map[s.id] = courseIdToGroup[s.prospectusCourseId];
+  });
+  return map;
+}
+
+// Auto-populates the Subjects tab with default subjects for every course across EVERY
+// uploaded program in the selected term — triggered when the user picks a Target Semester,
+// so multiple degree programs' full course load for that term is ready to optimize together
+// with no manual re-entry. Idempotent: a course that already has a linked subject is skipped,
+// so re-running (e.g. after adding more prospectus courses) never creates duplicates.
+// Best-effort duration defaults are derived from the prospectus's weekly Lec/Lab hours
+// (1-hour LEC sessions, one weekly LAB block) — review/adjust afterward in the Subjects tab.
+function autoPopulateSubjectsForTerm(term){
+  if(!term) return { added:0, skipped:0, matched:0 };
+  const courses = state.prospectus.filter(c=> normalizeTermValue(c.term)===term);
+  if(courses.length===0) return { added:0, skipped:0, matched:0 };
+  const linkedCourseIds = new Set(state.subjects.map(s=>s.prospectusCourseId).filter(Boolean));
+  let added = 0, skipped = 0;
+  courses.forEach(c=>{
+    if(linkedCourseIds.has(c.id)){ skipped++; return; }
+    const lec = c.lec || 0, lab = c.lab || 0;
+    if(lec<=0 && lab<=0){ skipped++; return; }
+    const tag = c.program ? ` [${c.program}]` : "";
+    if(lec>0){
+      state.subjects.push(buildSubjectRecord(
+        c.title + tag, 2 /* 1 hour */, clamp(Math.round(lec), 1, 7), null,
+        false, null, "LEC", false, c.id, false
+      ));
+      added++;
+    }
+    if(lab>0){
+      const labSlots = clamp(Math.round(lab*2), 1, 8); // one weekly block, capped at 4h/session
+      state.subjects.push(buildSubjectRecord(
+        c.title + (lec>0 ? " (Lab)" : "") + tag, labSlots, 1, null,
+        false, null, "LAB", false, c.id, false
+      ));
+      added++;
+    }
+  });
+  return { added, skipped, matched: courses.length };
+}
+
+// Wipes EVERY subject in the Subject tab — used when switching the Target Semester, so a
+// newly-selected term always starts from a clean slate instead of mixing in whatever was
+// listed before (auto-loaded from a previous term, or added by hand). Cleans up faculty's
+// subjectIds references (same as deleteSubject, just for everything at once) and clears a
+// stale schedule result, since it would otherwise reference subject IDs that no longer exist.
+function clearAllSubjects(){
+  const removedCount = state.subjects.length;
+  if(removedCount===0) return 0;
+  state.subjects = [];
+  state.faculty.forEach(f=>{ f.subjectIds = []; });
+  if(state.schedule) state.schedule = null;
+  return removedCount;
+}
+
+function populateSubjectProspectusSelect(){
+  const sel = document.getElementById("subj-prospectus-course");
+  if(!sel) return;
+  const prev = sel.value;
+  const groups = {};
+  const order = [];
+  state.prospectus.forEach(c=>{
+    const key = prospectusGroupKey(c);
+    if(!groups[key]){ groups[key] = []; order.push(key); }
+    groups[key].push(c);
+  });
+  let html = '<option value="">— none —</option>';
+  order.forEach(key=>{
+    const [program, yearLabel, term] = key.split("|");
+    html += `<optgroup label="${escapeHtml(program)} — ${escapeHtml(yearLabel)} — ${escapeHtml(term)}">`;
+    groups[key].forEach(c=>{
+      html += `<option value="${c.id}">${escapeHtml(c.code)}: ${escapeHtml(c.title)}</option>`;
+    });
+    html += `</optgroup>`;
+  });
+  sel.innerHTML = html;
+  if(state.prospectus.some(c=>c.id===prev)) sel.value = prev;
+}
+
+// Always exactly the 3 real-world terms — not derived from what's been uploaded — so
+// selecting one is a simple, predictable "which term am I scheduling" choice regardless of
+// how many programs/years happen to be in the prospectus yet.
+function populateTargetTermSelect(){
+  const sel = document.getElementById("target-term-select");
+  if(!sel) return;
+  let html = '<option value="">— none (no curriculum-conflict check) —</option>';
+  PROSPECTUS_TERMS.forEach(t=> html += `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`);
+  sel.innerHTML = html;
+  sel.value = PROSPECTUS_TERMS.includes(state.targetTerm) ? state.targetTerm : "";
+  if(!PROSPECTUS_TERMS.includes(state.targetTerm) && state.targetTerm){ state.targetTerm = ""; saveState(); }
+  updateTargetTermHint();
+}
+
+function renderProspectus(){
+  const badge = document.getElementById("badge-prospectus");
+  // Counts uploaded PROGRAMS, not individual courses — a badge of "74" (course count) reads
+  // as broken/alarming, while "1" (one uploaded prospectus) matches what the tab is about.
+  if(badge) badge.textContent = distinctPrograms().length;
+  const container = document.getElementById("prospectus-list");
+  if(!container) return;
+  if(state.prospectus.length===0){
+    container.innerHTML = '<div class="empty">No prospectus uploaded yet. Import a CSV or upload a PDF above.</div>';
+  } else {
+    // Program first, then Year+Term within each program — multiple degree programs stay
+    // visually separated even though they're all optimized together.
+    const programGroups = {};
+    const programOrder = [];
+    state.prospectus.forEach(c=>{
+      const p = c.program || "General";
+      if(!programGroups[p]){ programGroups[p] = []; programOrder.push(p); }
+      programGroups[p].push(c);
+    });
+    container.innerHTML = programOrder.map(program=>{
+      const courses = programGroups[program];
+      const termGroups = {};
+      const termOrder = [];
+      courses.forEach(c=>{
+        const key = prospectusTermKey(c);
+        if(!termGroups[key]){ termGroups[key] = []; termOrder.push(key); }
+        termGroups[key].push(c);
+      });
+      const termsHtml = termOrder.map(key=>{
+        const termCourses = termGroups[key];
+        const [yearLabel, term] = key.split("|");
+        return `<div class="prospectus-group">
+          <div class="prospectus-group-title">${escapeHtml(yearLabel)} — ${escapeHtml(term)} <span class="tag-lec" style="margin-left:8px;">${termCourses.length} course${termCourses.length===1?"":"s"}</span></div>
+          <table class="list-table">
+            <thead><tr><th>Code</th><th>Title</th><th>Units</th><th>Lec</th><th>Lab</th><th></th></tr></thead>
+            <tbody>${termCourses.map(c=>`
+              <tr>
+                <td>${escapeHtml(c.code)}</td>
+                <td>${escapeHtml(c.title)}</td>
+                <td>${c.units==null?"":c.units}</td>
+                <td>${c.lec||0}</td>
+                <td>${c.lab||0}</td>
+                <td><button class="btn btn-sm btn-danger" data-action="delete-prospectus-course" data-id="${c.id}">Delete</button></td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`;
+      }).join("");
+      return `<div class="prospectus-program-group">
+        <div class="prospectus-program-title">🎓 ${escapeHtml(program)} <span class="tag-external" style="margin-left:8px;">${courses.length} course${courses.length===1?"":"s"}</span>
+          <button class="btn btn-sm btn-danger" data-action="delete-prospectus-program" data-program="${escapeHtml(program)}" style="margin-left:10px;">Delete Program</button>
+        </div>
+        ${termsHtml}
+      </div>`;
+    }).join("");
+  }
+  populateSubjectProspectusSelect();
+  populateTargetTermSelect();
+  updateProspectusProgramList();
+}
+
+// Autocomplete list for the "Program Name" input, drawn from programs already uploaded, so
+// re-uploading more courses into an existing program is a consistent, typo-free pick.
+function updateProspectusProgramList(){
+  const list = document.getElementById("prospectus-program-list");
+  if(!list) return;
+  list.innerHTML = distinctPrograms().map(p=>`<option value="${escapeHtml(p)}"></option>`).join("");
+}
+
+function deleteProspectusCourse(id){
+  if(!confirm("Delete this prospectus course? Any subject linked to it will be unlinked.")) return;
+  state.prospectus = state.prospectus.filter(c=>c.id!==id);
+  state.subjects.forEach(s=>{ if(s.prospectusCourseId===id) s.prospectusCourseId = null; });
+  saveState();
+  renderProspectus();
+  renderSubjects();
+}
+function deleteProspectusProgram(program){
+  if(!confirm(`Delete every course uploaded under "${program}"? Any subject linked to one will be unlinked. This cannot be undone.`)) return;
+  const removedIds = new Set(state.prospectus.filter(c=>(c.program||"General")===program).map(c=>c.id));
+  state.prospectus = state.prospectus.filter(c=> !removedIds.has(c.id));
+  state.subjects.forEach(s=>{ if(s.prospectusCourseId && removedIds.has(s.prospectusCourseId)) s.prospectusCourseId = null; });
+  saveState();
+  renderProspectus();
+  renderSubjects();
+}
+function clearProspectus(){
+  if(state.prospectus.length===0) return;
+  if(!confirm("Clear the entire uploaded prospectus (all programs)? Linked subjects will be unlinked. This cannot be undone.")) return;
+  state.prospectus = [];
+  state.subjects.forEach(s=>{ s.prospectusCourseId = null; });
+  state.targetTerm = "";
+  saveState();
+  renderProspectus();
+  renderSubjects();
+}
+
+/* --- CSV import/export (reuses the generic CSV helpers defined later in this file — see
+   IMPORT / EXPORT section — via the shared parseCsv/rowsToCsv/downloadCsv/handleCsvImport) --- */
+function exportProspectusCsv(){
+  if(state.prospectus.length===0){ alert("No prospectus courses to export yet."); return; }
+  const rows = [["Program","Year","Term","CourseCode","CourseTitle","Units","LecHoursPerWeek","LabHoursPerWeek"]];
+  state.prospectus.forEach(c=> rows.push([c.program||"General", c.yearLabel, c.term, c.code, c.title, c.units==null?"":c.units, c.lec||0, c.lab||0]));
+  downloadCsv("prospectus.csv", rows);
+}
+function downloadProspectusTemplate(){
+  downloadCsv("prospectus-template.csv", [
+    ["Program","Year","Term","CourseCode","CourseTitle","Units","LecHoursPerWeek","LabHoursPerWeek"],
+    ["BS Electrical Engineering","First Year","First Semester","MAT060","Calculus with Analytical Geometry 1","4","4","0"],
+    ["BS Electrical Engineering","First Year","First Semester","CHM012.1","Chemistry for Engineers Laboratory","1","0","3"],
+    ["BS Electrical Engineering","Third Year","Summer Term","EEE197","On-the-Job Training","3","0","240"],
+    ["BS Civil Engineering","First Year","First Semester","MAT060","Calculus with Analytical Geometry 1","4","4","0"]
+  ]);
+}
+// `defaultProgram` is used for any row that leaves its own Program column blank (a CSV can
+// mix explicit per-row programs and blank ones that fall back to the Prospectus tab's
+// "Program Name" field). Duplicate rows (same Program+Year+Term+Code as something already in
+// the prospectus, or repeated within this same import) are skipped and counted separately.
+function importProspectusFromRows(dataRows, defaultProgram){
+  let added = 0, skipped = 0, duplicates = 0;
+  const seen = new Set(state.prospectus.map(c=> prospectusDupKey(c.program, c.yearLabel, c.term, c.code)));
+  dataRows.forEach(cols=>{
+    // Auto-detect an old-format row (pre-multi-program: Year,Term,Code,Title,Units,Lec,Lab —
+    // no leading Program column) by checking whether column 0 is a recognizable Year Label
+    // rather than a program name. Without this, re-importing an existing/older prospectus CSV
+    // (very likely once someone already has "1 uploaded" from before Program existed) would
+    // silently shift every field one column over — corrupting Term into a course code and
+    // making every course invisible to Target Semester selection with no visible error.
+    const isOldFormat = YEAR_LABEL_TO_NUM.hasOwnProperty((cols[0]||"").trim());
+    const off = isOldFormat ? -1 : 0; // old format has no leading Program column
+    const program = isOldFormat ? (defaultProgram||"").trim() : ((cols[0]||"").trim() || (defaultProgram||"").trim());
+    const yearLabel = (cols[1+off]||"").trim();
+    const term = normalizeTermValue(cols[2+off]);
+    const code = (cols[3+off]||"").trim();
+    const title = (cols[4+off]||"").trim();
+    if(!program || !yearLabel || !term || !code || !title){ skipped++; return; }
+    const key = prospectusDupKey(program, yearLabel, term, code);
+    if(seen.has(key)){ duplicates++; return; }
+    seen.add(key);
+    const unitsRaw = parseFloat(cols[5+off]);
+    const lecRaw = parseInt(cols[6+off],10);
+    const labRaw = parseInt(cols[7+off],10);
+    state.prospectus.push({
+      id: genId("psc"),
+      program,
+      year: YEAR_LABEL_TO_NUM[yearLabel] || null,
+      yearLabel, term, code, title,
+      units: isNaN(unitsRaw) ? null : unitsRaw,
+      lec: isNaN(lecRaw) ? 0 : lecRaw,
+      lab: isNaN(labRaw) ? 0 : labRaw
+    });
+    added++;
+  });
+  saveState();
+  renderProspectus();
+  return { added, skipped, duplicates };
+}
+
+/* --- PDF upload + review-before-import (parsing itself lives in prospectus-pdf.js) --- */
+let prospectusReviewRows = [];
+function openProspectusReviewModal(parsedRows, program){
+  prospectusReviewRows = parsedRows.map(c=>({ program, ...c }));
+  renderProspectusReviewTable();
+  document.getElementById("prospectus-review-modal-backdrop").classList.add("open");
+}
+function closeProspectusReviewModal(){
+  document.getElementById("prospectus-review-modal-backdrop").classList.remove("open");
+}
+function renderProspectusReviewTable(){
+  const table = document.getElementById("prospectus-review-table");
+  const existingKeys = new Set(state.prospectus.map(c=> prospectusDupKey(c.program, c.yearLabel, c.term, c.code)));
+  table.innerHTML = `<thead><tr><th>Program</th><th>Year</th><th>Term</th><th>Code</th><th>Title</th><th>Units</th><th>Lec</th><th>Lab</th><th></th></tr></thead>
+    <tbody>${prospectusReviewRows.map((c,i)=>{
+      const isDup = existingKeys.has(prospectusDupKey(c.program, c.yearLabel, c.term, c.code));
+      return `
+      <tr${isDup ? ' style="opacity:.55;"' : ''}>
+        <td><input data-i="${i}" data-f="program" value="${escapeHtml(c.program||"")}" style="width:130px;"></td>
+        <td><input data-i="${i}" data-f="yearLabel" value="${escapeHtml(c.yearLabel||"")}"></td>
+        <td><input data-i="${i}" data-f="term" value="${escapeHtml(c.term||"")}"></td>
+        <td><input data-i="${i}" data-f="code" value="${escapeHtml(c.code||"")}" style="width:90px;"></td>
+        <td><input data-i="${i}" data-f="title" value="${escapeHtml(c.title||"")}" style="min-width:220px;"></td>
+        <td><input data-i="${i}" data-f="units" type="number" value="${c.units==null?"":c.units}" style="width:60px;"></td>
+        <td><input data-i="${i}" data-f="lec" type="number" value="${c.lec==null?0:c.lec}" style="width:55px;"></td>
+        <td><input data-i="${i}" data-f="lab" type="number" value="${c.lab==null?0:c.lab}" style="width:55px;"></td>
+        <td>${isDup ? '<span class="tag-external" title="Already in your prospectus — will be skipped as a duplicate">dup</span>' : ''}<button class="btn btn-sm btn-danger" data-remove="${i}">✕</button></td>
+      </tr>`;
+    }).join("")}
+    </tbody>`;
+}
+
+/* ---------------------------------------------------------------------
+   AVAILABILITY EDITOR MODAL
+--------------------------------------------------------------------- */
+let editingRoomId = null;
+
+function openAvailModal(roomId){
+  editingRoomId = roomId;
+  const room = state.rooms.find(r=>r.id===roomId);
+  if(!room) return;
+  document.getElementById("avail-modal-title").textContent = "Edit Availability — " + room.name;
+  renderAvailGrid(room);
+  populateRoomHoursSelects(
+    document.getElementById("avail-custom-from"),
+    document.getElementById("avail-custom-until")
+  );
+  document.getElementById("avail-modal-backdrop").classList.add("open");
+}
+function closeAvailModal(){
+  document.getElementById("avail-modal-backdrop").classList.remove("open");
+  editingRoomId = null;
+  renderRooms();
+}
+
+function renderAvailGrid(room){
+  const table = document.getElementById("avail-grid-table");
+  let html = "<tr><th></th>";
+  for(let i=0;i<NUM_SLOTS;i++){
+    html += `<th>${i%2===0 ? slotLabel(i).replace(" ","") : ""}</th>`;
+  }
+  html += "</tr>";
+  DAYS.forEach(day=>{
+    html += `<tr><td class="daylabel" data-day="${day}">${day}</td>`;
+    for(let i=0;i<NUM_SLOTS;i++){
+      const on = room.availability[day][i];
+      html += `<td class="avail-cell ${on?"on":"off"}" data-day="${day}" data-idx="${i}" title="${DAY_FULL[day]} ${slotLabel(i)}"></td>`;
+    }
+    html += "</tr>";
+  });
+  table.innerHTML = html;
+}
+
+document.getElementById("avail-grid-table").addEventListener("click", (e)=>{
+  const room = state.rooms.find(r=>r.id===editingRoomId);
+  if(!room) return;
+  const dayLabel = e.target.closest(".daylabel");
+  if(dayLabel){
+    const day = dayLabel.dataset.day;
+    const arr = room.availability[day];
+    const mostlyOn = arr.filter(Boolean).length >= arr.length/2;
+    room.availability[day] = arr.map(()=> !mostlyOn);
+    saveState();
+    renderAvailGrid(room);
+    return;
+  }
+  const cell = e.target.closest(".avail-cell");
+  if(cell){
+    const day = cell.dataset.day, idx = +cell.dataset.idx;
+    room.availability[day][idx] = !room.availability[day][idx];
+    saveState();
+    renderAvailGrid(room);
+  }
+});
+
+document.querySelectorAll("[data-preset]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    const room = state.rooms.find(r=>r.id===editingRoomId);
+    if(!room) return;
+    const preset = btn.dataset.preset;
+    DAYS.forEach(day=>{
+      let val;
+      if(preset==="all") val = true;
+      else if(preset==="none") val = false;
+      else if(preset==="weekdays") val = ["Mon","Tue","Wed","Thu","Fri"].includes(day);
+      else if(preset==="weekend") val = ["Sat","Sun"].includes(day);
+      room.availability[day] = room.availability[day].map(()=>val);
+    });
+    saveState();
+    renderAvailGrid(room);
+  });
+});
+
+document.getElementById("avail-custom-apply").addEventListener("click", ()=>{
+  const room = state.rooms.find(r=>r.id===editingRoomId);
+  if(!room) return;
+  const openMin = parseInt(document.getElementById("avail-custom-from").value, 10);
+  const closeMin = parseInt(document.getElementById("avail-custom-until").value, 10);
+  if(closeMin <= openMin){ alert('"Open Until" must be after "Open From".'); return; }
+  // Overrides every day at once with the chosen custom hours, replacing whatever was
+  // toggled before — a quick way to widen/narrow a room's hours instead of clicking
+  // 34 x 7 cells by hand. Individual days/slots can still be fine-tuned afterward.
+  room.availability = makeAvailability(openMin, closeMin);
+  saveState();
+  renderAvailGrid(room);
+});
+
+document.getElementById("avail-modal-done").addEventListener("click", closeAvailModal);
+document.getElementById("avail-modal-backdrop").addEventListener("click", (e)=>{
+  if(e.target.id === "avail-modal-backdrop") closeAvailModal();
+});
+
+/* ---------------------------------------------------------------------
+   OPTIMIZER
+   Randomized greedy with restarts. Each trial tries to place every
+   Genetic Algorithm (permutation encoding): a chromosome is an ordering of
+   the scheduling tasks. Each order is decoded, deterministically and
+   conflict-free, by a greedy placer that walks the order and gives each
+   task the best still-free (room, day, start-slot, faculty) it can find —
+   respecting room availability & capacity, faculty qualification &
+   non-overlap (checked globally across all rooms), one-session-per-day per
+   subject, and a soft same-day/before-5PM preference for Laboratory
+   subjects. The GA evolves populations of orderings via tournament
+   selection, order crossover (OX) and swap mutation, scoring each decoded
+   result by (1) sessions scheduled, (2) room-utilization (packing density,
+   fewer half-empty room-days), (3) lab sessions kept within 7:30AM-5:00PM.
+--------------------------------------------------------------------- */
+const LAB_PREFERRED_END_MIN = 17*60; // 5:00 PM — soft cutoff for Laboratory subjects
+// subjectId -> [facultyId, ...] qualified/previously-handled faculty for that subject.
+function buildSubjectFacultyMap(){
+  const map = {};
+  state.faculty.forEach(f=>{
+    f.subjectIds.forEach(sid=>{
+      if(!map[sid]) map[sid] = [];
+      map[sid].push(f.id);
+    });
+  });
+  return map;
+}
+
+function buildTasks(){
+  const tasks = [];
+  const facultyMap = buildSubjectFacultyMap();
+  const cohortGroups = buildCohortGroups(); // subjectId -> "program|yearLabel" cohort key, or absent
+  state.subjects.forEach(s=>{
+    const facultyIds = facultyMap[s.id] || []; // empty = no faculty-conflict check for this subject
+    const cohortGroup = cohortGroups[s.id] || null; // must not overlap other required courses in the same program+year
+    const isCohort = !!cohortGroup;
+    const externalAssignment = !!s.externalAssignment; // true = no room/faculty, class hours only (TBA/TBD)
+    if(s.isSplitPair){
+      // One atomic task representing both 1.5h halves, placed on a matching day-pair at the same time.
+      tasks.push({
+        type: "paired",
+        subjectId:s.id, subjectName:s.name, durationSlots:s.durationSlots,
+        size:s.size, color:s.color, dayPairPref:s.dayPairPref,
+        sortWeight: s.durationSlots*2, facultyIds, isCohort, cohortGroup, externalAssignment
+      });
+    } else {
+      // Lab subjects split for room capacity produce 2 identical full-length sessions
+      // (e.g. Section 1 / Section 2), each scheduled independently — no same-time/room constraint.
+      for(let i=0;i<s.sessionsPerWeek;i++){
+        tasks.push({
+          type:"single", subjectId:s.id, subjectName:s.name, durationSlots:s.durationSlots,
+          size:s.size, color:s.color, sessionIndex:i, sortWeight:s.durationSlots,
+          subjectType: s.type, labSection: s.isCapacitySplit ? (i+1) : null,
+          facultyIds, isCohort, cohortGroup, externalAssignment
+        });
+      }
+    }
+  });
+  return tasks;
+}
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+// Among facultyIds, returns one at random who is free across all `days` for
+// [start, start+durationSlots) — or null if none of them are free (meaning this
+// slot can't be taught by anyone qualified and must be rejected as a candidate).
+function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
+  const freeOnes = facultyIds.filter(fid=>{
+    return days.every(day=>{
+      const arr = facultyOcc[fid][day];
+      for(let k=0;k<durationSlots;k++){ if(arr[start+k]) return false; }
+      return true;
+    });
+  });
+  if(freeOnes.length===0) return null;
+  return freeOnes[Math.floor(Math.random()*freeOnes.length)];
+}
+
+function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc){
+  if(usedDaysForSubject.has(day)) return [];
+  if(size && room.capacity && room.capacity < size) return [];
+  const avail = room.availability[day];
+  const occArr = occ[room.id][day];
+  const cohortArr = isCohort ? cohortOcc[day] : null;
+  const out = [];
+  for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+    let ok = true;
+    for(let k=0;k<durationSlots;k++){
+      if(!avail[start+k] || occArr[start+k]){ ok=false; break; }
+      if(cohortArr && cohortArr[start+k]){ ok=false; break; } // a required course for the same regular-student year level already occupies this time
+    }
+    if(!ok) continue;
+    let facultyId = null;
+    if(facultyIds && facultyIds.length){
+      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [day], start, durationSlots);
+      if(!facultyId) continue; // no qualified faculty free at this room/time — not a valid slot
+    }
+    let adj = 0;
+    if(start>0 && occArr[start-1]) adj++;
+    if(start+durationSlots<NUM_SLOTS && occArr[start+durationSlots]) adj++;
+    const capWaste = (size && room.capacity) ? (room.capacity - size) : 0;
+    out.push({ roomId:room.id, day, start, adj, capWaste, facultyId });
+  }
+  return out;
+}
+
+// External-Assignment subjects: room and faculty are handled by another college/department
+// (TBA / TBD), so the optimizer only needs to find a free (day, start-slot) for the class
+// hours themselves — no room availability/capacity, and no faculty check. The only remaining
+// hard constraint is the shared regular-student cohort grid, so these still can't overlap
+// another required course for the same year level.
+function findScheduleOnlyCandidates(day, durationSlots, usedDaysForSubject, isCohort, cohortOcc){
+  if(usedDaysForSubject.has(day)) return [];
+  const cohortArr = isCohort ? cohortOcc[day] : null;
+  const out = [];
+  for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+    if(cohortArr){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){ if(cohortArr[start+k]){ ok=false; break; } }
+      if(!ok) continue;
+    }
+    out.push({ day, start, adj:0, capWaste:0 });
+  }
+  return out;
+}
+function findScheduleOnlyPairedCandidates(pairKey, durationSlots, isCohort, cohortOcc){
+  const [d1,d2] = DAY_PAIRS[pairKey];
+  const cohort1 = isCohort ? cohortOcc[d1] : null, cohort2 = isCohort ? cohortOcc[d2] : null;
+  const out = [];
+  for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+    if(cohort1){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){ if(cohort1[start+k] || cohort2[start+k]){ ok=false; break; } }
+      if(!ok) continue;
+    }
+    out.push({ pairKey, day1:d1, day2:d2, start, adj:0, capWaste:0 });
+  }
+  return out;
+}
+
+// Finds (start-slot) candidates in `room` for a paired subject on a specific day-pair,
+// requiring BOTH days to be free/available at the same start slot (same time, same room),
+// AND a qualified faculty member free on both days at that same time.
+function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc){
+  if(size && room.capacity && room.capacity < size) return [];
+  const [d1,d2] = DAY_PAIRS[pairKey];
+  const av1 = room.availability[d1], av2 = room.availability[d2];
+  const occ1 = occ[room.id][d1], occ2 = occ[room.id][d2];
+  const cohort1 = isCohort ? cohortOcc[d1] : null, cohort2 = isCohort ? cohortOcc[d2] : null;
+  const out = [];
+  for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+    let ok = true;
+    for(let k=0;k<durationSlots;k++){
+      if(!av1[start+k] || occ1[start+k] || !av2[start+k] || occ2[start+k]){ ok=false; break; }
+      if(cohort1 && (cohort1[start+k] || cohort2[start+k])){ ok=false; break; }
+    }
+    if(!ok) continue;
+    let facultyId = null;
+    if(facultyIds && facultyIds.length){
+      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [d1,d2], start, durationSlots);
+      if(!facultyId) continue;
+    }
+    let adj = 0;
+    if(start>0 && (occ1[start-1] || occ2[start-1])) adj++;
+    if(start+durationSlots<NUM_SLOTS && (occ1[start+durationSlots] || occ2[start+durationSlots])) adj++;
+    const capWaste = (size && room.capacity) ? (room.capacity - size) : 0;
+    out.push({ roomId:room.id, pairKey, day1:d1, day2:d2, start, adj, capWaste, facultyId });
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------------
+   CONFLICT DIAGNOSTICS
+   When a task can't be placed, figure out WHY by checking progressively
+   looser feasibility levels (capacity -> static room availability -> room
+   contention against other bookings -> same-day contention -> faculty
+   contention) and reporting the first level that actually blocks it, so
+   the user gets a specific, actionable reason instead of a generic
+   "couldn't schedule" — and can tell at a glance whether it's a room
+   problem or a faculty problem.
+--------------------------------------------------------------------- */
+function roomHasStaticBlock(room, durationSlots, excludeDays){
+  return DAYS.some(d=>{
+    if(excludeDays && excludeDays.has(d)) return false;
+    const avail = room.availability[d];
+    for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){ if(!avail[start+k]){ ok=false; break; } }
+      if(ok) return true;
+    }
+    return false;
+  });
+}
+function roomHasFreeBlock(room, durationSlots, occ, excludeDays){
+  return DAYS.some(d=>{
+    if(excludeDays && excludeDays.has(d)) return false;
+    const avail = room.availability[d], occArr = occ[room.id][d];
+    for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){ if(!avail[start+k] || occArr[start+k]){ ok=false; break; } }
+      if(ok) return true;
+    }
+    return false;
+  });
+}
+function facultyNamesFor(facultyIds){
+  return facultyIds.map(id=>{ const f=state.faculty.find(x=>x.id===id); return f?f.name:null; }).filter(Boolean);
+}
+// Once room/time is known to be available on its own, isolate which of the two remaining
+// hard constraints (faculty, regular-student cohort) is actually the blocker by checking
+// each one independently (the other ignored) — so the diagnosis names the real cause
+// instead of defaulting to "faculty" whenever a cohort conflict is the true reason.
+function anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, facultyIds, facultyOcc){
+  return bigEnough.some(room=> DAYS.some(d=>{
+    if(usedDaysForSubject.has(d)) return false;
+    const avail = room.availability[d], occArr = occ[room.id][d];
+    for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){ if(!avail[start+k] || occArr[start+k]){ ok=false; break; } }
+      if(!ok) continue;
+      if(facultyIds && facultyIds.length && !pickFreeFaculty(facultyIds, facultyOcc, [d], start, durationSlots)) continue;
+      return true;
+    }
+    return false;
+  }));
+}
+function anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc){
+  return bigEnough.some(room=> DAYS.some(d=>{
+    if(usedDaysForSubject.has(d)) return false;
+    const avail = room.availability[d], occArr = occ[room.id][d];
+    const cohortArr = isCohort ? cohortOcc[d] : null;
+    for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){
+        if(!avail[start+k] || occArr[start+k]){ ok=false; break; }
+        if(cohortArr && cohortArr[start+k]){ ok=false; break; }
+      }
+      if(ok) return true;
+    }
+    return false;
+  }));
+}
+// "program|yearLabel" -> "Program — Year Level" for diagnostic messages.
+function cohortGroupLabel(cohortGroup){
+  if(!cohortGroup) return "the same regular-student cohort";
+  return cohortGroup.split("|").join(" — ");
+}
+function diagnoseSingleTask(task, occ, usedDaysForSubject, isCohort, cohortOcc, facultyOcc){
+  const size = task.size, durationSlots = task.durationSlots;
+  const bigEnough = state.rooms.filter(r => !size || !r.capacity || r.capacity>=size);
+  if(bigEnough.length===0){
+    const maxCap = state.rooms.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
+    return { type:"room", text:`No room seats ${size} — the largest room available seats ${maxCap||0}. Add a bigger room or lower the class size.` };
+  }
+  if(!bigEnough.some(r=> roomHasStaticBlock(r, durationSlots, null))){
+    const hrs = (durationSlots*SLOT_LEN/60);
+    return { type:"room", text:`No room seating ${size||"enough students"} has a continuous ${hrs}-hour open block anywhere in its weekly availability — check Edit Availability for those rooms.` };
+  }
+  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, null))){
+    return { type:"room", text:`Every room big enough for this session is already booked at all the times it's open long enough — add another suitably-sized room, or free up an existing booking.` };
+  }
+  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, usedDaysForSubject))){
+    return { type:"room", text:`A free room/time exists, but only on a day this subject already has another session — reduce Sessions/Week, or widen room availability to more days.` };
+  }
+  const cohortOnlyOk = anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc);
+  const facultyOnlyOk = anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, task.facultyIds, facultyOcc);
+  if(!cohortOnlyOk){
+    return { type:"student", text:`Room and time are free, but this required course would overlap another required course for ${cohortGroupLabel(task.cohortGroup)} — no time avoids conflicting with that cohort's other courses. Try adjusting the other course's schedule, or add another room/faculty to free up options.` };
+  }
+  if(!facultyOnlyOk){
+    const names = facultyNamesFor(task.facultyIds);
+    return { type:"faculty", text:`A suitable room and time are free, but every listed faculty member (${names.join(", ")}) is already booked at all of those times.` };
+  }
+  return { type: isCohort ? "student" : "faculty", text:`Room and time exist for the faculty schedule alone, and separately for ${cohortGroupLabel(task.cohortGroup)} alone, but no single slot satisfies both at once — free up either the faculty's schedule or that cohort's other courses.` };
+}
+function diagnosePairedTask(task, occ, isCohort, cohortOcc){
+  const size = task.size, durationSlots = task.durationSlots;
+  const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
+  const pairLabels = pairKeys.map(pk=>DAY_PAIR_LABELS[pk]).join(", ");
+  const bigEnough = state.rooms.filter(r => !size || !r.capacity || r.capacity>=size);
+  if(bigEnough.length===0){
+    const maxCap = state.rooms.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
+    return { type:"room", text:`No room seats ${size} — the largest room available seats ${maxCap||0}. Add a bigger room or lower the class size.` };
+  }
+  function pairBlock(room, pk, withOcc, withCohort){
+    const [d1,d2] = DAY_PAIRS[pk];
+    const a1=room.availability[d1], a2=room.availability[d2];
+    const o1 = withOcc ? occ[room.id][d1] : null, o2 = withOcc ? occ[room.id][d2] : null;
+    const c1 = withCohort ? cohortOcc[d1] : null, c2 = withCohort ? cohortOcc[d2] : null;
+    for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
+      let ok = true;
+      for(let k=0;k<durationSlots;k++){
+        if(!a1[start+k] || !a2[start+k] || (withOcc && (o1[start+k]||o2[start+k]))){ ok=false; break; }
+        if(withCohort && (c1[start+k]||c2[start+k])){ ok=false; break; }
+      }
+      if(ok) return true;
+    }
+    return false;
+  }
+  if(!bigEnough.some(r=> pairKeys.some(pk=> pairBlock(r, pk, false, false)))){
+    return { type:"room", text:`No room big enough has a matching open block on both days of its preferred day pair (${pairLabels}) — check room availability.` };
+  }
+  if(!bigEnough.some(r=> pairKeys.some(pk=> pairBlock(r, pk, true, false)))){
+    return { type:"room", text:`Every room big enough is already booked at all matching same-time slots across its preferred day pair(s) (${pairLabels}) — add another room or free up a booking.` };
+  }
+  if(isCohort && !bigEnough.some(r=> pairKeys.some(pk=> pairBlock(r, pk, true, true)))){
+    return { type:"student", text:`Room and time are free, but this required course would overlap another required course for ${cohortGroupLabel(task.cohortGroup)} on its preferred day pair (${pairLabels}) — no matching time avoids conflicting with that cohort's other courses.` };
+  }
+  const names = facultyNamesFor(task.facultyIds);
+  return { type:"faculty", text:`A matching room and time are free on at least one preferred day pair (${pairLabels}), but every listed faculty member (${names.join(", ")}) is already booked at all of those times.` };
+}
+
+// External-Assignment tasks have no room/faculty constraint at all — with 7:30AM-9:00PM
+// available every day, the only realistic reasons placement can fail are (a) the subject's
+// own sessions have used up every day already, or (b) every remaining day/time overlaps
+// another required course for the same regular-student year level.
+function diagnoseScheduleOnlyTask(task, usedDaysForSubject, isCohort){
+  const daysLeft = DAYS.filter(d=> !usedDaysForSubject.has(d));
+  if(daysLeft.length===0){
+    return { type:"student", text:`This subject already has a session on every day of the week — reduce Sessions/Week.` };
+  }
+  if(!isCohort){
+    return { type:"student", text:`No time slot could be placed for this class-hours-only session — try again, or check Sessions/Week isn't higher than available days.` };
+  }
+  return { type:"student", text:`Room and faculty aren't required (External Assignment), but every remaining day/time overlaps another required course for ${cohortGroupLabel(task.cohortGroup)} — try adjusting the other course's schedule.` };
+}
+function diagnoseScheduleOnlyPairedTask(task, isCohort){
+  const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
+  const pairLabels = pairKeys.map(pk=>DAY_PAIR_LABELS[pk]).join(", ");
+  return { type:"student", text:`Room and faculty aren't required (External Assignment), but no matching time on its preferred day pair (${pairLabels}) avoids overlapping another required course for ${cohortGroupLabel(task.cohortGroup)}.` };
+}
+
+// Safety net run on the GA's final result before anything is plotted: the decoder is built
+// to be conflict-free by construction, but this independently re-checks every scheduled
+// session for room double-bookings, faculty double-bookings, and regular-student
+// (curriculum cohort) double-bookings. Anything that fails is pulled out of the plotted
+// schedule and moved into the conflicts list for manual review — so only genuinely
+// conflict-free sessions ever get plotted, no matter what produced them.
+function validateAndSplitConflicts(result){
+  const assignments = result.assignments;
+  const overlaps = (a,b) => a.startSlot < (b.startSlot+b.durationSlots) && b.startSlot < (a.startSlot+a.durationSlots);
+
+  function conflictSet(keyFn){
+    const ids = new Set();
+    const groups = {};
+    assignments.forEach(a=>{
+      const key = keyFn(a);
+      if(key==null) return;
+      (groups[key] = groups[key] || []).push(a);
+    });
+    Object.values(groups).forEach(list=>{
+      for(let i=0;i<list.length;i++) for(let j=i+1;j<list.length;j++){
+        if(overlaps(list[i], list[j])){ ids.add(list[i].id); ids.add(list[j].id); }
+      }
+    });
+    return ids;
+  }
+
+  // External-Assignment sessions (roomId===TBA_ROOM_ID) don't occupy a real room, so several
+  // of them legitimately sharing the same day/time is not a room double-booking.
+  const roomConflictIds = conflictSet(a=> (a.roomId && a.roomId!==TBA_ROOM_ID) ? a.roomId+"|"+a.day : null);
+  const facultyConflictIds = conflictSet(a=> a.facultyId ? a.facultyId+"|"+a.day : null);
+  // Grouped by cohortGroup ("program|yearLabel"), not just "isCohort" — two cohort sessions
+  // only conflict if they belong to the SAME program+year (see buildCohortGroups).
+  const cohortConflictIds = conflictSet(a=> a.cohortGroup ? a.cohortGroup+"|"+a.day : null);
+
+  if(roomConflictIds.size===0 && facultyConflictIds.size===0 && cohortConflictIds.size===0) return result; // common case
+
+  const newAssignments = [];
+  const newUnscheduled = result.unscheduled.slice();
+  assignments.forEach(a=>{
+    const isRoomConflict = roomConflictIds.has(a.id);
+    const isFacultyConflict = facultyConflictIds.has(a.id);
+    const isCohortConflict = cohortConflictIds.has(a.id);
+    if(!isRoomConflict && !isFacultyConflict && !isCohortConflict){ newAssignments.push(a); return; }
+    const type = isRoomConflict ? "room" : (isCohortConflict ? "student" : "faculty");
+    const parts = [];
+    if(isRoomConflict) parts.push(`a room double-booking in ${a.roomName}`);
+    if(isFacultyConflict) parts.push(`a faculty double-booking for ${a.facultyName||"the assigned faculty"}`);
+    if(isCohortConflict) parts.push(`a regular-student schedule conflict with another required course for ${(a.cohortGroup||"").split("|").join(" — ")||"the same program/year level"}`);
+    let text = `Detected ${parts.join(" and ")} on ${DAY_FULL[a.day]} at ${fmtTime(a.startMin)}. Pulled from the schedule for manual review.`;
+    newUnscheduled.push({ subjectName:a.subjectName, sessionIndex:0, labSection:a.labSection, conflictType:type, conflictReason:text });
+  });
+  return Object.assign({}, result, { assignments:newAssignments, unscheduled:newUnscheduled, scheduledCount:newAssignments.length });
+}
+
+function runTrial(tasksOrder){
+  const occ = {};
+  state.rooms.forEach(r=>{
+    occ[r.id] = {};
+    DAYS.forEach(d=> occ[r.id][d] = new Array(NUM_SLOTS).fill(false));
+  });
+  const facultyOcc = {}; // facultyId -> day -> slot occupancy, shared across ALL rooms (one person, one place)
+  state.faculty.forEach(f=>{
+    facultyOcc[f.id] = {};
+    DAYS.forEach(d=> facultyOcc[f.id][d] = new Array(NUM_SLOTS).fill(false));
+  });
+  // One occupancy grid PER regular-student cohort (year level) — every required course for a
+  // given year level in the target semester must avoid every other required course for that
+  // SAME year level, since one student takes them all at once. Different year levels get
+  // their own independent grid, so (e.g.) a First Year course and a Second Year course never
+  // block each other — they're different students, taking classes in parallel.
+  const cohortOccByGroup = {};
+  function groupOccFor(group){
+    if(!group) return null;
+    if(!cohortOccByGroup[group]){
+      cohortOccByGroup[group] = {};
+      DAYS.forEach(d=> cohortOccByGroup[group][d] = new Array(NUM_SLOTS).fill(false));
+    }
+    return cohortOccByGroup[group];
+  }
+  const usedDays = {}; // subjectId -> Set(day)
+  const assignments = [];
+  const unscheduled = [];
+  let lateLabCount = 0; // Laboratory sessions that spilled past LAB_PREFERRED_END_MIN
+
+  // Total occupied slots per room so far this trial — used to bias placement toward
+  // rooms already in use (maximize room utilization / minimize half-empty rooms).
+  function roomLoad(roomId){
+    let load = 0;
+    DAYS.forEach(d=> occ[roomId][d].forEach(v=>{ if(v) load++; }));
+    return load;
+  }
+
+  tasksOrder.forEach(task=>{
+    if(task.type === "paired"){
+      if(task.externalAssignment){
+        const groupOcc = groupOccFor(task.cohortGroup);
+        const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
+        let allCandidates = [];
+        pairKeys.forEach(pk=>{
+          allCandidates = allCandidates.concat(findScheduleOnlyPairedCandidates(pk, task.durationSlots, task.isCohort, groupOcc));
+        });
+        if(allCandidates.length===0){
+          const reason = diagnoseScheduleOnlyPairedTask(task, task.isCohort);
+          unscheduled.push({ subjectName:task.subjectName, sessionIndex:0, paired:true, conflictType:reason.type, conflictReason:reason.text });
+          unscheduled.push({ subjectName:task.subjectName, sessionIndex:1, paired:true, conflictType:reason.type, conflictReason:reason.text });
+          return;
+        }
+        const pairPriority = pk => pairKeys.indexOf(pk);
+        allCandidates.sort((a,b)=>{
+          const p = pairPriority(a.pairKey) - pairPriority(b.pairKey);
+          return p || (Math.random()-0.5);
+        });
+        const topN = Math.min(3, allCandidates.length);
+        const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+        if(groupOcc){
+          for(let k=0;k<task.durationSlots;k++){
+            groupOcc[pick.day1][pick.start+k] = true;
+            groupOcc[pick.day2][pick.start+k] = true;
+          }
+        }
+        const pairLabel = DAY_PAIR_LABELS[pick.pairKey];
+        [pick.day1, pick.day2].forEach(day=>{
+          assignments.push({
+            id: genId("asg"),
+            subjectId: task.subjectId, subjectName: task.subjectName, color: task.color,
+            facultyId: null, facultyName: "TBD",
+            roomId: TBA_ROOM_ID, roomName: "TBA",
+            day, startSlot: pick.start, durationSlots: task.durationSlots,
+            startMin: SLOT_TIMES[pick.start], endMin: SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN,
+            paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup, external:true
+          });
+        });
+        return;
+      }
+      const groupOcc = groupOccFor(task.cohortGroup);
+      const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
+      let allCandidates = [];
+      state.rooms.forEach(room=>{
+        pairKeys.forEach(pk=>{
+          allCandidates = allCandidates.concat(findPairedCandidates(room, pk, task.durationSlots, occ, task.size, task.facultyIds, facultyOcc, task.isCohort, groupOcc));
+        });
+      });
+
+      if(allCandidates.length===0){
+        // Report as two individual unscheduled sessions so totals stay consistent with sessionsPerWeek.
+        const reason = diagnosePairedTask(task, occ, task.isCohort, groupOcc);
+        unscheduled.push({ subjectName:task.subjectName, sessionIndex:0, paired:true, conflictType:reason.type, conflictReason:reason.text });
+        unscheduled.push({ subjectName:task.subjectName, sessionIndex:1, paired:true, conflictType:reason.type, conflictReason:reason.text });
+        return;
+      }
+      // Respect the preferred pair priority order first (1. Mon/Wed, 2. Tue/Thu, 3. Fri/Sat when AUTO),
+      // then favor rooms already carrying load + tight packing (maximize utilization), then minimize wasted capacity.
+      const pairPriority = pk => pairKeys.indexOf(pk);
+      const loadCache = {};
+      allCandidates.sort((a,b)=>{
+        const p = pairPriority(a.pairKey) - pairPriority(b.pairKey);
+        if(p) return p;
+        const aLoad = (loadCache[a.roomId] ??= roomLoad(a.roomId));
+        const bLoad = (loadCache[b.roomId] ??= roomLoad(b.roomId));
+        const aScore = a.adj*10 + aLoad, bScore = b.adj*10 + bLoad;
+        if(aScore !== bScore) return bScore - aScore;
+        if(a.capWaste !== b.capWaste) return a.capWaste - b.capWaste;
+        return Math.random()-0.5;
+      });
+      const topN = Math.min(3, allCandidates.length);
+      const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+
+      for(let k=0;k<task.durationSlots;k++){
+        occ[pick.roomId][pick.day1][pick.start+k] = true;
+        occ[pick.roomId][pick.day2][pick.start+k] = true;
+        if(pick.facultyId){
+          facultyOcc[pick.facultyId][pick.day1][pick.start+k] = true;
+          facultyOcc[pick.facultyId][pick.day2][pick.start+k] = true;
+        }
+        if(groupOcc){
+          groupOcc[pick.day1][pick.start+k] = true;
+          groupOcc[pick.day2][pick.start+k] = true;
+        }
+      }
+      const room = state.rooms.find(r=>r.id===pick.roomId);
+      const faculty = pick.facultyId ? state.faculty.find(f=>f.id===pick.facultyId) : null;
+      const pairLabel = DAY_PAIR_LABELS[pick.pairKey];
+      [pick.day1, pick.day2].forEach(day=>{
+        assignments.push({
+          id: genId("asg"),
+          subjectId: task.subjectId, subjectName: task.subjectName, color: task.color,
+          facultyId: pick.facultyId, facultyName: faculty ? faculty.name : null,
+          roomId: pick.roomId, roomName: room.name,
+          day, startSlot: pick.start, durationSlots: task.durationSlots,
+          startMin: SLOT_TIMES[pick.start], endMin: SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN,
+          paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup
+        });
+      });
+      return;
+    }
+
+    if(!usedDays[task.subjectId]) usedDays[task.subjectId] = new Set();
+
+    if(task.externalAssignment){
+      const groupOcc = groupOccFor(task.cohortGroup);
+      let allCandidates = [];
+      DAYS.forEach(day=>{
+        allCandidates = allCandidates.concat(findScheduleOnlyCandidates(day, task.durationSlots, usedDays[task.subjectId], task.isCohort, groupOcc));
+      });
+      if(allCandidates.length===0){
+        const reason = diagnoseScheduleOnlyTask(task, usedDays[task.subjectId], task.isCohort);
+        unscheduled.push({
+          subjectName: task.subjectName, sessionIndex: task.sessionIndex, labSection: task.labSection,
+          conflictType: reason.type, conflictReason: reason.text
+        });
+        return;
+      }
+      const pick = allCandidates[Math.floor(Math.random()*allCandidates.length)];
+      if(groupOcc){
+        for(let k=0;k<task.durationSlots;k++) groupOcc[pick.day][pick.start+k] = true;
+      }
+      usedDays[task.subjectId].add(pick.day);
+      const endMin = SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN;
+      assignments.push({
+        id: genId("asg"),
+        subjectId: task.subjectId, subjectName: task.subjectName, color: task.color,
+        subjectType: task.subjectType, labSection: task.labSection,
+        facultyId: null, facultyName: "TBD",
+        roomId: TBA_ROOM_ID, roomName: "TBA",
+        day: pick.day, startSlot: pick.start, durationSlots: task.durationSlots,
+        startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup, external:true
+      });
+      return;
+    }
+
+    const groupOcc = groupOccFor(task.cohortGroup);
+    let allCandidates = [];
+    state.rooms.forEach(room=>{
+      DAYS.forEach(day=>{
+        const cands = findCandidates(room, day, task.durationSlots, occ, task.size, usedDays[task.subjectId], task.facultyIds, facultyOcc, task.isCohort, groupOcc);
+        allCandidates = allCandidates.concat(cands);
+      });
+    });
+
+    if(allCandidates.length===0){
+      const reason = diagnoseSingleTask(task, occ, usedDays[task.subjectId], task.isCohort, groupOcc, facultyOcc);
+      unscheduled.push({
+        subjectName: task.subjectName, sessionIndex: task.sessionIndex, labSection: task.labSection,
+        conflictType: reason.type, conflictReason: reason.text
+      });
+      return;
+    }
+    // Laboratory subjects: prefer a candidate that stays within 7:30AM-5:00PM as much as
+    // possible, but this is a soft preference only — a later slot is still used if it's
+    // the only option (never filtered out, just sorted after the on-time ones).
+    const isLab = task.subjectType === "LAB";
+    const loadCache = {};
+    allCandidates.sort((a,b)=>{
+      if(isLab){
+        const aLate = (SLOT_TIMES[a.start]+task.durationSlots*SLOT_LEN) > LAB_PREFERRED_END_MIN ? 1 : 0;
+        const bLate = (SLOT_TIMES[b.start]+task.durationSlots*SLOT_LEN) > LAB_PREFERRED_END_MIN ? 1 : 0;
+        if(aLate !== bLate) return aLate - bLate;
+      }
+      const aLoad = (loadCache[a.roomId] ??= roomLoad(a.roomId));
+      const bLoad = (loadCache[b.roomId] ??= roomLoad(b.roomId));
+      const aScore = a.adj*10 + aLoad, bScore = b.adj*10 + bLoad;
+      if(aScore !== bScore) return bScore - aScore;
+      if(a.capWaste !== b.capWaste) return a.capWaste - b.capWaste;
+      return Math.random()-0.5;
+    });
+    const topN = Math.min(3, allCandidates.length);
+    const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+
+    for(let k=0;k<task.durationSlots;k++){
+      occ[pick.roomId][pick.day][pick.start+k] = true;
+      if(pick.facultyId) facultyOcc[pick.facultyId][pick.day][pick.start+k] = true;
+      if(groupOcc) groupOcc[pick.day][pick.start+k] = true;
+    }
+    usedDays[task.subjectId].add(pick.day);
+    const room = state.rooms.find(r=>r.id===pick.roomId);
+    const faculty = pick.facultyId ? state.faculty.find(f=>f.id===pick.facultyId) : null;
+    const endMin = SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN;
+    if(isLab && endMin > LAB_PREFERRED_END_MIN) lateLabCount++;
+    assignments.push({
+      id: genId("asg"),
+      subjectId: task.subjectId, subjectName: task.subjectName, color: task.color,
+      subjectType: task.subjectType, labSection: task.labSection,
+      facultyId: pick.facultyId, facultyName: faculty ? faculty.name : null,
+      roomId: pick.roomId, roomName: room.name,
+      day: pick.day, startSlot: pick.start, durationSlots: task.durationSlots,
+      startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup
+    });
+  });
+
+  // Room-utilization metrics: gapScore = total idle slots trapped between the first and
+  // last booking of each room-day (lower = tighter packing); activeRoomDayCount = how many
+  // distinct room-days got used at all (lower = usage concentrated into fewer room-days
+  // instead of spread thin) — both feed the "maximize room utilization" objective.
+  let gapScore = 0;
+  let activeRoomDayCount = 0;
+  state.rooms.forEach(r=>{
+    DAYS.forEach(d=>{
+      const arr = occ[r.id][d];
+      let first=-1, last=-1, count=0;
+      arr.forEach((v,i)=>{ if(v){ if(first===-1) first=i; last=i; count++; } });
+      if(first!==-1){ gapScore += (last-first+1-count); activeRoomDayCount++; }
+    });
+  });
+
+  return { assignments, unscheduled, scheduledCount: assignments.length, gapScore, activeRoomDayCount, lateLabCount };
+}
+
+/* ---------------------------------------------------------------------
+   GENETIC ALGORITHM OPERATORS (permutation encoding over task order)
+--------------------------------------------------------------------- */
+
+// Fitness: sessions scheduled dominates everything (an empty slot is always worse than
+// any packing/timing imperfection), then room utilization (tight packing + fewer
+// half-empty room-days), then keeping Laboratory sessions within 7:30AM-5:00PM.
+function scoreResult(result){
+  return result.scheduledCount * 100000
+       - result.gapScore * 3
+       - result.activeRoomDayCount * 6
+       - result.lateLabCount * 25;
+}
+
+function tournamentSelect(evaluated, k){
+  let picked = null;
+  for(let i=0;i<k;i++){
+    const cand = evaluated[Math.floor(Math.random()*evaluated.length)];
+    if(!picked || cand.fitness > picked.fitness) picked = cand;
+  }
+  return picked;
+}
+
+// Order Crossover (OX): copies a random slice from parent A as-is, then fills the
+// remaining positions with parent B's genes in their relative order, skipping
+// whatever parent A's slice already contributed — always yields a valid permutation.
+function orderCrossover(parentA, parentB){
+  const n = parentA.length;
+  const child = new Array(n).fill(null);
+  let i = Math.floor(Math.random()*n), j = Math.floor(Math.random()*n);
+  if(i>j){ const tmp=i; i=j; j=tmp; }
+  const usedIds = new Set();
+  for(let k=i;k<=j;k++){ child[k] = parentA[k]; usedIds.add(parentA[k].__gaId); }
+  let pos = (j+1)%n;
+  for(let k=0;k<n;k++){
+    const cand = parentB[(j+1+k)%n];
+    if(!usedIds.has(cand.__gaId)){
+      child[pos] = cand;
+      usedIds.add(cand.__gaId);
+      pos = (pos+1)%n;
+    }
+  }
+  return child;
+}
+
+// Swap mutation: exchange a couple of random positions — standard, minimally-disruptive
+// mutation operator for permutation-encoded GAs.
+function swapMutate(order){
+  const a = order.slice();
+  const swaps = 1 + Math.floor(Math.random()*2); // 1-2 swaps
+  for(let s=0;s<swaps;s++){
+    const i = Math.floor(Math.random()*a.length);
+    const j = Math.floor(Math.random()*a.length);
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+
+// Yields control back to the browser (lets the progress modal repaint) between generations.
+function nextTick(){ return new Promise(resolve => setTimeout(resolve, 0)); }
+
+// optimizeSchedule is async so it can pause between generations and let the UI update a
+// live progress/convergence view. `onProgress`, if given, is called after every generation
+// (including the seed generation) with a snapshot of the run so far.
+async function optimizeSchedule(onProgress){
+  if(state.subjects.length===0) return null;
+  // Rooms are only a hard requirement when some subject actually needs one — an all-External-
+  // Assignment roster is schedulable with zero rooms defined.
+  const needsRoom = state.subjects.some(s=>!s.externalAssignment);
+  if(needsRoom && state.rooms.length===0) return null;
+  const baseTasks = buildTasks();
+  if(baseTasks.length===0) return null;
+  baseTasks.forEach((t,i)=> t.__gaId = i);
+  const totalTasks = baseTasks.length;
+
+  function decode(order){
+    const result = runTrial(order);
+    result.fitness = scoreResult(result);
+    return result;
+  }
+  function isPerfect(r){
+    return r.scheduledCount===totalTasks && r.gapScore===0 && r.lateLabCount===0;
+  }
+
+  // GA parameters auto-scale with problem complexity — more rooms widen the search space
+  // per task, more faculty adds extra conflict constraints, more subjects/sessions means
+  // more genes to coordinate, and more regular-student cohort constraints (one independent
+  // shared grid per program+year-level in the target term — a 4-year program's term has 4 of
+  // these running at once, each with its own courses contending for the same students' time)
+  // add real combinatorial difficulty on top — so harder problems automatically get a bigger
+  // population, more generations, and a larger time budget, with no input needed from the user.
+  const numRooms = state.rooms.length;
+  const numFaculty = state.faculty.length;
+  const numSubjects = state.subjects.length;
+  const numCohortTasks = baseTasks.filter(t=>t.isCohort).length;
+  const numCohortGroups = new Set(baseTasks.filter(t=>t.isCohort).map(t=>t.cohortGroup)).size;
+  const complexity = totalTasks * (1 + Math.log2(numRooms + 1)) + numFaculty*3 + numSubjects + numCohortTasks*1.5 + numCohortGroups*4;
+  const popSize = clamp(Math.round(complexity*1.5), 20, 150);
+  const maxGenerations = clamp(Math.round(complexity*2.2), 25, 300);
+  const eliteCount = Math.max(2, Math.round(popSize*0.08));
+  const mutationRate = 0.25;
+  const tournamentK = 3;
+  const timeBudgetMs = clamp(1500 + complexity*40, 1500, 6000);
+
+  // Seed the initial population with one heuristic ordering (most-constrained-first —
+  // longest weekly duration, then largest class size) plus random permutations, so the
+  // GA never starts worse than the old greedy-with-restarts baseline.
+  const heuristicOrder = baseTasks.slice().sort((a,b)=>
+    (b.sortWeight - a.sortWeight) || ((b.size||0)-(a.size||0))
+  );
+  let population = [heuristicOrder];
+  while(population.length < popSize) population.push(shuffle(baseTasks));
+
+  let evaluated = population.map(order=>{
+    const result = decode(order);
+    return { order, result, fitness: result.fitness };
+  });
+  evaluated.sort((a,b)=> b.fitness - a.fitness);
+  let best = evaluated[0];
+
+  function report(genCount, done){
+    if(!onProgress) return;
+    // totalSessions counts actual class SESSIONS (a paired task = 2 sessions), matching
+    // what scheduledCount/unscheduled.length count — totalTasks (chromosome length) is a
+    // different unit and would under-count whenever any paired subjects are involved.
+    const totalSessions = best.result.scheduledCount + best.result.unscheduled.length;
+    const studentConflicts = best.result.unscheduled.filter(u=>u.conflictType==="student").length;
+    onProgress({
+      generation: genCount, maxGenerations, popSize, totalTasks, totalSessions, done,
+      fitness: best.fitness,
+      scheduledCount: best.result.scheduledCount,
+      gapScore: best.result.gapScore,
+      activeRoomDayCount: best.result.activeRoomDayCount,
+      lateLabCount: best.result.lateLabCount,
+      cohortGroups: numCohortGroups,
+      studentConflicts
+    });
+  }
+
+  const start = performance.now();
+  let genCount = 1; // the seed generation above already counts as generation 1
+  report(genCount, false);
+  await nextTick();
+
+  for(let gen=0; gen<maxGenerations; gen++){
+    if(isPerfect(best.result)) break;
+    if(performance.now() - start > timeBudgetMs) break;
+
+    const nextPop = [];
+    for(let i=0;i<eliteCount && i<evaluated.length;i++) nextPop.push(evaluated[i].order.slice());
+    while(nextPop.length < popSize){
+      const parentA = tournamentSelect(evaluated, tournamentK);
+      const parentB = tournamentSelect(evaluated, tournamentK);
+      let child = orderCrossover(parentA.order, parentB.order);
+      if(Math.random() < mutationRate) child = swapMutate(child);
+      nextPop.push(child);
+    }
+
+    population = nextPop;
+    evaluated = population.map(order=>{
+      const result = decode(order);
+      return { order, result, fitness: result.fitness };
+    });
+    evaluated.sort((a,b)=> b.fitness - a.fitness);
+    if(evaluated[0].fitness > best.fitness) best = evaluated[0];
+    genCount = gen+2;
+    report(genCount, false);
+    await nextTick();
+  }
+  best.result.generationsRun = genCount;
+  best.result.populationSize = popSize;
+  report(genCount, true);
+  return best.result;
+}
+
+/* ---------------------------------------------------------------------
+   SCHEDULE RENDERING
+--------------------------------------------------------------------- */
+let scheduleView = "grid"; // "grid" | "faculty" | "cohort" | "list"
+let scheduleRoomId = null;
+let scheduleFacultyId = null;
+let scheduleCohortGroup = null;
+
+function renderScheduleTab(){
+  const container = document.getElementById("schedule-results");
+  const sched = state.schedule;
+
+  if(!sched){
+    container.innerHTML = `<div class="panel"><div class="empty">No schedule yet. Add rooms &amp; subjects, then click "Optimize Scheduling".</div></div>`;
+    return;
+  }
+
+  const total = sched.assignments.length + sched.unscheduled.length;
+  let html = "";
+
+  html += `<div class="summary-bar">
+    <div class="summary-item hero"><div class="label">Sessions Scheduled</div><b>${sched.assignments.length} / ${total}</b></div>
+    <div class="summary-item"><div class="label">Rooms</div><b>${state.rooms.length}</b></div>
+    <div class="summary-item"><div class="label">Subjects</div><b>${state.subjects.length}</b></div>
+  </div>`;
+
+  if(sched.unscheduled.length>0){
+    const label = u => `${escapeHtml(u.subjectName)} — ${u.labSection?`LAB Section ${u.labSection}`:`session ${u.sessionIndex+1}`}${u.paired?" (paired)":""}`;
+    const roomConflicts = sched.unscheduled.filter(u=> u.conflictType!=="faculty" && u.conflictType!=="student");
+    const facultyConflicts = sched.unscheduled.filter(u=> u.conflictType==="faculty");
+    const studentConflicts = sched.unscheduled.filter(u=> u.conflictType==="student");
+    html += `<div class="panel conflict-panel">
+      <h2>⚠️ Scheduling Conflicts (${sched.unscheduled.length})</h2>
+      <p class="sub">These sessions couldn't be placed automatically. Room, faculty, and regular-student issues are listed separately so you can address each manually — then click Optimize Scheduling again.</p>
+      ${roomConflicts.length ? `<div class="conflict-group">
+        <h3>🏫 Room Conflicts (${roomConflicts.length})</h3>
+        <ul>${roomConflicts.map(u=>`<li><b>${label(u)}</b><div class="conflict-reason">${escapeHtml(u.conflictReason||"No free matching room/time slot was found.")}</div></li>`).join("")}</ul>
+      </div>` : ""}
+      ${facultyConflicts.length ? `<div class="conflict-group">
+        <h3>👤 Faculty Conflicts (${facultyConflicts.length})</h3>
+        <ul>${facultyConflicts.map(u=>`<li><b>${label(u)}</b><div class="conflict-reason">${escapeHtml(u.conflictReason||"No qualified faculty member was free.")}</div></li>`).join("")}</ul>
+      </div>` : ""}
+      ${studentConflicts.length ? `<div class="conflict-group">
+        <h3>🎓 Regular-Student Schedule Conflicts (${studentConflicts.length})</h3>
+        <ul>${studentConflicts.map(u=>`<li><b>${label(u)}</b><div class="conflict-reason">${escapeHtml(u.conflictReason||"Conflicts with another required course in the same program/year level.")}</div></li>`).join("")}</ul>
+      </div>` : ""}
+    </div>`;
+  }
+
+  html += `<div class="panel no-print">
+    <div class="sched-toolbar" style="margin-bottom:0;">
+      <div class="field">
+        <label>View</label>
+        <select id="view-mode-select" style="min-width:170px;">
+          <option value="grid" ${scheduleView==="grid"?"selected":""}>Room Timetable</option>
+          <option value="faculty" ${scheduleView==="faculty"?"selected":""}>Faculty Schedule</option>
+          <option value="cohort" ${scheduleView==="cohort"?"selected":""}>Regular-Student Schedule</option>
+          <option value="list" ${scheduleView==="list"?"selected":""}>List View</option>
+        </select>
+      </div>
+      <div class="field" id="room-select-field" style="${scheduleView==="grid"?"":"display:none;"}">
+        <label>Room</label>
+        <select id="sched-room-select" style="min-width:160px;"></select>
+      </div>
+      <div class="field" id="faculty-select-field" style="${scheduleView==="faculty"?"":"display:none;"}">
+        <label>Faculty</label>
+        <select id="sched-faculty-select" style="min-width:180px;"></select>
+      </div>
+      <div class="field" id="cohort-select-field" style="${scheduleView==="cohort"?"":"display:none;"}">
+        <label>Regular-Student Cohort</label>
+        <select id="sched-cohort-select" style="min-width:220px;"></select>
+      </div>
+      <button class="btn btn-ghost" id="print-btn" style="align-self:flex-end;">🖨 Print</button>
+      <button class="btn btn-ghost" id="csv-btn" style="align-self:flex-end;">⬇ Export CSV</button>
+    </div>
+  </div>`;
+
+  html += `<div class="panel" id="sched-view-panel"></div>`;
+
+  container.innerHTML = html;
+
+  document.getElementById("view-mode-select").addEventListener("change", (e)=>{
+    scheduleView = e.target.value;
+    renderScheduleTab();
+  });
+  document.getElementById("print-btn").addEventListener("click", ()=> window.print());
+  document.getElementById("csv-btn").addEventListener("click", exportCsv);
+
+  const roomSelect = document.getElementById("sched-room-select");
+  if(roomSelect){
+    // External-Assignment sessions (TBA/TBD, no real room) get their own virtual "room" entry
+    // in the picker so they're still visible in the Room Timetable view, not just List View.
+    const hasExternal = sched.assignments.some(a=> a.roomId===TBA_ROOM_ID);
+    let optionsHtml = state.rooms.map(r=>`<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
+    if(hasExternal) optionsHtml += `<option value="${TBA_ROOM_ID}">🏢 ${escapeHtml(TBA_ROOM_NAME)}</option>`;
+    roomSelect.innerHTML = optionsHtml;
+    const validIds = new Set(state.rooms.map(r=>r.id));
+    if(hasExternal) validIds.add(TBA_ROOM_ID);
+    if(!scheduleRoomId || !validIds.has(scheduleRoomId)) scheduleRoomId = state.rooms[0] ? state.rooms[0].id : (hasExternal ? TBA_ROOM_ID : null);
+    roomSelect.value = scheduleRoomId;
+    roomSelect.addEventListener("change", (e)=>{ scheduleRoomId = e.target.value; renderScheduleView(); });
+  }
+
+  const facultySelect = document.getElementById("sched-faculty-select");
+  if(facultySelect){
+    facultySelect.innerHTML = state.faculty.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join("");
+    const validFacIds = new Set(state.faculty.map(f=>f.id));
+    if(!scheduleFacultyId || !validFacIds.has(scheduleFacultyId)) scheduleFacultyId = state.faculty[0] ? state.faculty[0].id : null;
+    if(scheduleFacultyId) facultySelect.value = scheduleFacultyId;
+    facultySelect.addEventListener("change", (e)=>{ scheduleFacultyId = e.target.value; renderScheduleView(); });
+  }
+
+  const cohortSelect = document.getElementById("sched-cohort-select");
+  if(cohortSelect){
+    // Only cohorts that actually have at least one scheduled (plotted) session — a cohort
+    // whose every course conflicted has nothing to show on a grid anyway.
+    const cohortGroups = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=>a.cohortGroup))).sort();
+    cohortSelect.innerHTML = cohortGroups.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(cohortGroupLabel(g))}</option>`).join("");
+    if(!scheduleCohortGroup || !cohortGroups.includes(scheduleCohortGroup)) scheduleCohortGroup = cohortGroups[0] || null;
+    if(scheduleCohortGroup) cohortSelect.value = scheduleCohortGroup;
+    cohortSelect.addEventListener("change", (e)=>{ scheduleCohortGroup = e.target.value; renderScheduleView(); });
+  }
+
+  renderScheduleView();
+}
+
+function renderScheduleView(){
+  const panel = document.getElementById("sched-view-panel");
+  const sched = state.schedule;
+  if(!panel || !sched) return;
+
+  if(scheduleView === "list"){
+    panel.innerHTML = renderListView(sched);
+    return;
+  }
+
+  if(scheduleView === "faculty"){
+    if(state.faculty.length===0){
+      panel.innerHTML = '<div class="empty">No faculty added yet — add faculty in the Faculty tab to see their individual schedules here.</div>';
+      return;
+    }
+    const faculty = state.faculty.find(f=>f.id===scheduleFacultyId) || state.faculty[0];
+    panel.innerHTML = renderFacultyGrid(faculty, sched);
+    return;
+  }
+
+  if(scheduleView === "cohort"){
+    const cohortGroups = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=>a.cohortGroup)));
+    if(cohortGroups.length===0){
+      panel.innerHTML = '<div class="empty">No regular-student cohorts in this schedule — set a Target Semester (above) and link subjects to prospectus courses, then optimize again.</div>';
+      return;
+    }
+    const group = cohortGroups.includes(scheduleCohortGroup) ? scheduleCohortGroup : cohortGroups[0];
+    panel.innerHTML = renderCohortGrid(group, sched);
+    return;
+  }
+
+  if(scheduleRoomId === TBA_ROOM_ID){
+    // Virtual "room" — fully open (no real availability grid, just the standard time window)
+    // — for viewing External-Assignment sessions on the same grid layout as a real room.
+    const tbaRoom = { id: TBA_ROOM_ID, name: TBA_ROOM_NAME, capacity: null, availability: makeAvailability() };
+    panel.innerHTML = renderRoomGrid(tbaRoom, sched);
+    return;
+  }
+  const room = state.rooms.find(r=>r.id===scheduleRoomId) || state.rooms[0];
+  if(!room){ panel.innerHTML = '<div class="empty">No rooms.</div>'; return; }
+  panel.innerHTML = renderRoomGrid(room, sched);
+}
+
+// Shared weekly grid renderer behind all three grid-shaped views (Room Timetable, Faculty
+// Schedule, Regular-Student Schedule) — takes a list of assignments already scoped to one
+// room/faculty/cohort and lays them out on the standard 7:30 AM–9:00 PM grid. `availability`
+// (per-day open/closed array), when given, grays out closed slots the way a room's own hours
+// do; faculty/cohort views have no such concept and just leave every non-booked cell free.
+// `tagFlags` controls which per-session badges are worth repeating in this particular view —
+// e.g. a faculty member's own grid doesn't need to relabel their name in every cell, but does
+// need the room name since their sessions span multiple rooms.
+function renderScheduleGrid(title, subtitleHtml, assignments, availability, tagFlags){
+  tagFlags = tagFlags || {};
+  const grid = {};
+  DAYS.forEach(d=> grid[d] = new Array(NUM_SLOTS).fill(null));
+
+  assignments.forEach(a=>{
+    grid[a.day][a.startSlot] = { type:"start", a };
+    for(let k=1;k<a.durationSlots;k++) grid[a.day][a.startSlot+k] = { type:"covered" };
+  });
+  if(availability){
+    for(let i=0;i<NUM_SLOTS;i++){
+      DAYS.forEach(d=>{
+        if(grid[d][i]===null && !availability[d][i]) grid[d][i] = { type:"unavail" };
+      });
+    }
+  }
+
+  let html = `<h2 style="margin-top:0;">${title}</h2>`;
+  if(subtitleHtml) html += subtitleHtml;
+  html += `<div style="overflow-x:auto;"><table class="sched-grid"><thead><tr><th class="timecol"></th>${DAYS.map(d=>`<th>${d}</th>`).join("")}</tr></thead><tbody>`;
+
+  for(let i=0;i<NUM_SLOTS;i++){
+    html += `<tr><td class="timecol">${slotLabel(i)}</td>`;
+    DAYS.forEach(d=>{
+      const cell = grid[d][i];
+      if(cell && cell.type==="covered"){ return; } // skip, covered by rowspan above
+      if(cell && cell.type==="start"){
+        const a = cell.a;
+        const labTag = a.labSection ? `<div style="margin-top:3px;"><span class="tag-lab">LAB · Section ${a.labSection}</span></div>` : "";
+        const pairTag = a.paired ? `<div style="margin-top:3px;"><span class="tag-pair">⇄ ${a.pairLabel}</span></div>` : "";
+        const roomTag = tagFlags.showRoom && a.roomName ? `<div style="margin-top:3px;"><span class="tag-faculty">🏫 ${escapeHtml(a.roomName)}</span></div>` : "";
+        const facTag = tagFlags.showFaculty && a.facultyName ? `<div style="margin-top:3px;"><span class="tag-faculty">👤 ${escapeHtml(a.facultyName)}</span></div>` : "";
+        const cohortTag = tagFlags.showCohort && a.isCohort ? `<div style="margin-top:3px;"><span class="tag-lec" title="${escapeHtml(cohortGroupLabel(a.cohortGroup))}">🎓 required</span></div>` : "";
+        const externalTag = a.external ? `<div style="margin-top:3px;"><span class="tag-external">🏢 external</span></div>` : "";
+        html += `<td class="slot-booked" rowspan="${a.durationSlots}" style="background:${a.color}">${escapeHtml(a.subjectName)}<div class="t">${fmtTime(a.startMin)}–${fmtTime(a.endMin)}</div>${pairTag}${labTag}${roomTag}${facTag}${cohortTag}${externalTag}</td>`;
+      } else if(cell && cell.type==="unavail"){
+        html += `<td class="slot-unavail"></td>`;
+      } else {
+        html += `<td class="slot-free"></td>`;
+      }
+    });
+    html += `</tr>`;
+  }
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+function renderRoomGrid(room, sched){
+  const assignments = sched.assignments.filter(a=>a.roomId===room.id);
+  const title = `${escapeHtml(room.name)}${room.capacity?` <span style="color:var(--text-dim);font-weight:400;font-size:13px;">(capacity ${room.capacity})</span>`:""}`;
+  return renderScheduleGrid(title, "", assignments, room.availability, { showFaculty:true, showCohort:true });
+}
+
+function renderFacultyGrid(faculty, sched){
+  const assignments = sched.assignments.filter(a=>a.facultyId===faculty.id);
+  const title = `👤 ${escapeHtml(faculty.name)}`;
+  const subtitle = `<p class="sub">${assignments.length} session${assignments.length===1?"":"s"} this week.</p>`;
+  return renderScheduleGrid(title, subtitle, assignments, null, { showRoom:true, showCohort:true });
+}
+
+function renderCohortGrid(cohortGroup, sched){
+  const assignments = sched.assignments.filter(a=>a.cohortGroup===cohortGroup);
+  const title = `🎓 ${escapeHtml(cohortGroupLabel(cohortGroup))} — Regular Students`;
+  const subtitle = `<p class="sub">${assignments.length} required session${assignments.length===1?"":"s"} this week — every course a regular student in this cohort takes.</p>`;
+  return renderScheduleGrid(title, subtitle, assignments, null, { showRoom:true, showFaculty:true });
+}
+
+function renderListView(sched){
+  if(sched.assignments.length===0) return '<div class="empty">No sessions scheduled.</div>';
+  const sorted = sched.assignments.slice().sort((a,b)=>
+    DAYS.indexOf(a.day)-DAYS.indexOf(b.day) || a.startSlot-b.startSlot || a.roomName.localeCompare(b.roomName)
+  );
+  let html = `<table class="list-table"><thead><tr><th>Subject</th><th>Faculty</th><th>Room</th><th>Day</th><th>Time</th></tr></thead><tbody>`;
+  sorted.forEach(a=>{
+    html += `<tr>
+      <td><span class="dot" style="background:${a.color}"></span>${escapeHtml(a.subjectName)}${a.paired?` <span class="tag-pair">⇄ ${a.pairLabel}</span>`:""}${a.labSection?` <span class="tag-lab">LAB · Section ${a.labSection}</span>`:""}${a.isCohort?` <span class="tag-lec" title="${escapeHtml(cohortGroupLabel(a.cohortGroup))}">🎓 ${escapeHtml(cohortGroupLabel(a.cohortGroup))}</span>`:""}${a.external?` <span class="tag-external">🏢 external</span>`:""}</td>
+      <td>${a.facultyName ? escapeHtml(a.facultyName) : `<span class="tag-faculty on-light">unassigned</span>`}</td>
+      <td>${escapeHtml(a.roomName)}</td>
+      <td>${DAY_FULL[a.day]}</td>
+      <td>${fmtTime(a.startMin)} – ${fmtTime(a.endMin)}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  return html;
+}
+
+function slugify(s){
+  return String(s).trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"") || "item";
+}
+
+// Exports whatever the current View is actually showing — the full list for List View, or
+// just the selected room/faculty member/cohort's own sessions for the 3 grid views — so the
+// downloaded file matches what's on screen (and what Print would produce) rather than always
+// dumping everything regardless of what's being looked at.
+function exportCsv(){
+  const sched = state.schedule;
+  if(!sched || sched.assignments.length===0){ alert("No scheduled sessions to export yet."); return; }
+
+  let assignments = sched.assignments;
+  let filename = "schedule-all.csv";
+  let scopeLabel = "";
+
+  // If the view is scoped to a room/faculty/cohort, the selection must still resolve to
+  // something real — a stale reference (e.g. the selected room/faculty was deleted, or no
+  // cohort exists) must never silently fall back to exporting everything unscoped under a
+  // misleadingly generic filename; tell the user and stop instead.
+  if(scheduleView === "grid"){
+    if(scheduleRoomId === TBA_ROOM_ID){
+      assignments = assignments.filter(a=>a.roomId===TBA_ROOM_ID);
+      filename = "schedule-room-tba.csv";
+      scopeLabel = TBA_ROOM_NAME;
+    } else {
+      const room = state.rooms.find(r=>r.id===scheduleRoomId);
+      if(!room){ alert("No room is selected — pick a room from the dropdown first."); return; }
+      assignments = assignments.filter(a=>a.roomId===room.id);
+      filename = `schedule-room-${slugify(room.name)}.csv`;
+      scopeLabel = room.name;
+    }
+  } else if(scheduleView === "faculty"){
+    const faculty = state.faculty.find(f=>f.id===scheduleFacultyId);
+    if(!faculty){ alert("No faculty member is selected — add a faculty member first."); return; }
+    assignments = assignments.filter(a=>a.facultyId===faculty.id);
+    filename = `schedule-faculty-${slugify(faculty.name)}.csv`;
+    scopeLabel = faculty.name;
+  } else if(scheduleView === "cohort"){
+    if(!scheduleCohortGroup){ alert("No regular-student cohort is selected or available — set a Target Semester and optimize again."); return; }
+    assignments = assignments.filter(a=>a.cohortGroup===scheduleCohortGroup);
+    filename = `schedule-cohort-${slugify(cohortGroupLabel(scheduleCohortGroup))}.csv`;
+    scopeLabel = cohortGroupLabel(scheduleCohortGroup);
+  }
+
+  if(assignments.length===0){ alert(`No scheduled sessions to export for ${scopeLabel || "this view"} yet.`); return; }
+
+  const rows = [["Subject","Faculty","Room","Day","Start","End"]];
+  assignments.slice()
+    .sort((a,b)=> DAYS.indexOf(a.day)-DAYS.indexOf(b.day) || a.startSlot-b.startSlot)
+    .forEach(a=> rows.push([a.subjectName, a.facultyName || "", a.roomName, DAY_FULL[a.day], fmtTime(a.startMin), fmtTime(a.endMin)]));
+  const csv = rows.map(r=> r.map(v=> `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = filename;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------------------------------------------------------------
+   EVENT WIRING
+--------------------------------------------------------------------- */
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-"+btn.dataset.tab).classList.add("active");
+  });
+});
+
+document.getElementById("add-room-btn").addEventListener("click", ()=>{
+  const nameInput = document.getElementById("room-name");
+  const capInput = document.getElementById("room-capacity");
+  const openFromSel = document.getElementById("room-open-from");
+  const openUntilSel = document.getElementById("room-open-until");
+  const name = nameInput.value.trim();
+  if(!name){ alert("Please enter a room name."); nameInput.focus(); return; }
+  let cap = null;
+  if(capInput.value.trim()){
+    cap = parseInt(capInput.value,10);
+    if(isNaN(cap) || cap<=0){ alert("Capacity must be a positive whole number, or left blank."); capInput.focus(); return; }
+  }
+  const openMin = parseInt(openFromSel.value, 10);
+  const closeMin = parseInt(openUntilSel.value, 10);
+  if(closeMin <= openMin){ alert('"Open Until" must be after "Open From".'); return; }
+  addRoom(name, cap, openMin, closeMin);
+  nameInput.value=""; capInput.value="";
+  nameInput.focus();
+});
+
+document.getElementById("room-list").addEventListener("click",(e)=>{
+  const editBtn = e.target.closest('[data-action="edit-avail"]');
+  const delBtn = e.target.closest('[data-action="delete-room"]');
+  if(editBtn) openAvailModal(editBtn.dataset.id);
+  if(delBtn) deleteRoom(delBtn.dataset.id);
+});
+
+const SPLIT_ELIGIBLE_SLOTS = "6"; // 6 x 30min = 3 hours
+
+const typeSelectEl = document.getElementById("subj-type");
+const durationSelectEl = document.getElementById("subj-duration");
+const splitToggleField = document.getElementById("split-toggle-field");
+const splitToggleEl = document.getElementById("subj-split-toggle");
+const splitPairField = document.getElementById("split-pair-field");
+const labSplitToggleField = document.getElementById("lab-split-toggle-field");
+const labSplitToggleEl = document.getElementById("subj-lab-split-toggle");
+const sessionsInputEl = document.getElementById("subj-sessions");
+
+function refreshSplitUI(){
+  const isLab = typeSelectEl.value === "LAB";
+
+  // Lecture-only: 3-hour paired time-split (2x1.5h on Mon+Wed / Tue+Thu / Fri+Sat).
+  const eligible = !isLab && durationSelectEl.value === SPLIT_ELIGIBLE_SLOTS;
+  splitToggleField.style.display = eligible ? "" : "none";
+  if(!eligible && splitToggleEl.checked){
+    splitToggleEl.checked = false;
+  }
+  const splitOn = eligible && splitToggleEl.checked;
+  splitPairField.style.display = splitOn ? "" : "none";
+
+  // Laboratory-only: capacity split into 2 identical full-length independent sections.
+  labSplitToggleField.style.display = isLab ? "" : "none";
+  if(!isLab && labSplitToggleEl.checked){
+    labSplitToggleEl.checked = false;
+  }
+  const labSplitOn = isLab && labSplitToggleEl.checked;
+
+  sessionsInputEl.disabled = splitOn || labSplitOn;
+  if(splitOn || labSplitOn){
+    sessionsInputEl.value = "2";
+  }
+}
+typeSelectEl.addEventListener("change", refreshSplitUI);
+durationSelectEl.addEventListener("change", refreshSplitUI);
+splitToggleEl.addEventListener("change", refreshSplitUI);
+labSplitToggleEl.addEventListener("change", refreshSplitUI);
+
+document.getElementById("add-subject-btn").addEventListener("click", ()=>{
+  const nameInput = document.getElementById("subj-name");
+  const name = nameInput.value.trim();
+  if(!name){ alert("Please enter a subject name."); nameInput.focus(); return; }
+
+  const type = typeSelectEl.value === "LAB" ? "LAB" : "LEC";
+  const isSplit = type === "LEC" && durationSelectEl.value === SPLIT_ELIGIBLE_SLOTS && splitToggleEl.checked;
+  const isCapacitySplit = type === "LAB" && labSplitToggleEl.checked;
+  const durationSlots = isSplit ? 3 : parseInt(durationSelectEl.value,10); // 3 slots = 1.5h per split session
+  const dayPairPref = isSplit ? document.getElementById("subj-split-pair").value : null;
+
+  let sessions = parseInt(sessionsInputEl.value,10) || 1;
+  sessions = (isSplit || isCapacitySplit) ? 2 : Math.max(1, Math.min(7, sessions));
+
+  const sizeInput = document.getElementById("subj-size");
+  let size = null;
+  if(sizeInput.value.trim()){
+    size = parseInt(sizeInput.value,10);
+    if(isNaN(size) || size<=0){ alert("Class size must be a positive whole number, or left blank."); sizeInput.focus(); return; }
+  }
+  const prospectusSelect = document.getElementById("subj-prospectus-course");
+  const prospectusCourseId = prospectusSelect.value || null;
+  const externalToggleEl = document.getElementById("subj-external-toggle");
+  const externalAssignment = externalToggleEl.checked;
+
+  addSubject(name, durationSlots, sessions, size, isSplit, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment);
+
+  nameInput.value=""; sizeInput.value="";
+  splitToggleEl.checked = false;
+  labSplitToggleEl.checked = false;
+  sessionsInputEl.disabled = false;
+  sessionsInputEl.value = "1";
+  prospectusSelect.value = "";
+  externalToggleEl.checked = false;
+  refreshSplitUI();
+  nameInput.focus();
+});
+
+document.getElementById("subject-list").addEventListener("click",(e)=>{
+  const delBtn = e.target.closest('[data-action="delete-subject"]');
+  const extBtn = e.target.closest('[data-action="toggle-external"]');
+  if(delBtn) deleteSubject(delBtn.dataset.id);
+  if(extBtn) toggleSubjectExternal(extBtn.dataset.id);
+});
+
+document.getElementById("add-faculty-btn").addEventListener("click", ()=>{
+  const nameInput = document.getElementById("faculty-name");
+  const name = nameInput.value.trim();
+  if(!name){ alert("Please enter a faculty name."); nameInput.focus(); return; }
+  const subjectsSelect = document.getElementById("faculty-subjects");
+  const subjectIds = Array.from(subjectsSelect.selectedOptions).map(o=>o.value);
+  addFaculty(name, subjectIds);
+  nameInput.value = "";
+  Array.from(subjectsSelect.options).forEach(o=> o.selected = false);
+  nameInput.focus();
+});
+
+document.getElementById("faculty-list").addEventListener("click",(e)=>{
+  const delBtn = e.target.closest('[data-action="delete-faculty"]');
+  if(delBtn) deleteFaculty(delBtn.dataset.id);
+});
+
+/* --- Prospectus tab wiring --- */
+document.getElementById("prospectus-list").addEventListener("click",(e)=>{
+  const delBtn = e.target.closest('[data-action="delete-prospectus-course"]');
+  const delProgramBtn = e.target.closest('[data-action="delete-prospectus-program"]');
+  if(delBtn) deleteProspectusCourse(delBtn.dataset.id);
+  if(delProgramBtn) deleteProspectusProgram(delProgramBtn.dataset.program);
+});
+document.getElementById("prospectus-clear-btn").addEventListener("click", clearProspectus);
+
+document.getElementById("prospectus-export-btn").addEventListener("click", exportProspectusCsv);
+document.getElementById("prospectus-template-btn").addEventListener("click", downloadProspectusTemplate);
+document.getElementById("prospectus-import-btn").addEventListener("click", ()=> document.getElementById("prospectus-import-file").click());
+document.getElementById("prospectus-import-file").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  const programInput = document.getElementById("prospectus-program-input");
+  const defaultProgram = programInput ? programInput.value.trim() : "";
+  if(file) handleCsvImport(file, (rows)=> importProspectusFromRows(rows, defaultProgram), (r)=>
+    `Imported ${r.added} prospectus course(s).${r.duplicates ? ` Skipped ${r.duplicates} duplicate(s) already in your prospectus.` : ""}${r.skipped ? ` Skipped ${r.skipped} row(s) missing Program/Year/Term/Code/Title.` : ""}`
+  , ["program", "year"]);
+  e.target.value = "";
+});
+
+document.getElementById("prospectus-pdf-btn").addEventListener("click", ()=> document.getElementById("prospectus-pdf-file").click());
+document.getElementById("prospectus-pdf-file").addEventListener("change", async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = "";
+  if(!file) return;
+  if(!/\.pdf$/i.test(file.name)){
+    alert(`"${file.name}" doesn't look like a PDF file (expected a .pdf extension) — pick the right file, or use CSV import instead.`);
+    return;
+  }
+  // PDF rows never carry a Program column (the parser can't reliably read a curriculum's
+  // cover-page title), so a Program Name is required up front — every parsed course gets
+  // tagged with it, which is also what lets duplicate-detection tell two programs' courses
+  // apart even when they happen to share a course code (e.g. NSTP, PE).
+  const programInput = document.getElementById("prospectus-program-input");
+  const program = programInput ? programInput.value.trim() : "";
+  if(!program){
+    alert('Enter a "Program Name" first (e.g. "BS Electrical Engineering") — every course in this PDF will be tagged with it.');
+    programInput && programInput.focus();
+    return;
+  }
+  if(typeof window.parseProspectusPdf !== "function"){
+    alert("The PDF-parsing module didn't load. Try refreshing the page, or use CSV import instead.");
+    return;
+  }
+  const statusEl = document.getElementById("prospectus-pdf-status");
+  statusEl.textContent = "Reading PDF… (loads a PDF-parsing library from the internet the first time)";
+  try{
+    const parsed = await window.parseProspectusPdf(file);
+    statusEl.textContent = "";
+    if(parsed.length===0){
+      alert('Couldn\'t find any recognizable "Year, Term" course table in that PDF. Try CSV import instead, or check the file.');
+      return;
+    }
+    openProspectusReviewModal(parsed, program);
+  }catch(err){
+    statusEl.textContent = "";
+    alert("Couldn't read that PDF: " + (err && err.message ? err.message : err));
+  }
+});
+
+document.getElementById("prospectus-review-table").addEventListener("input",(e)=>{
+  const i = e.target.dataset.i, f = e.target.dataset.f;
+  if(i==null || !f) return;
+  const v = e.target.value;
+  prospectusReviewRows[i][f] = (f==="units"||f==="lec"||f==="lab") ? (v===""?null:Number(v)) : v;
+  if(f==="program"||f==="yearLabel"||f==="term"||f==="code") renderProspectusReviewTable(); // re-flag duplicates live
+});
+document.getElementById("prospectus-review-table").addEventListener("click",(e)=>{
+  const btn = e.target.closest("[data-remove]");
+  if(!btn) return;
+  prospectusReviewRows.splice(Number(btn.dataset.remove),1);
+  renderProspectusReviewTable();
+});
+document.getElementById("prospectus-review-cancel").addEventListener("click", closeProspectusReviewModal);
+document.getElementById("prospectus-review-modal-backdrop").addEventListener("click",(e)=>{
+  if(e.target.id === "prospectus-review-modal-backdrop") closeProspectusReviewModal();
+});
+document.getElementById("prospectus-review-import").addEventListener("click", ()=>{
+  let added = 0, skipped = 0, duplicates = 0;
+  const seen = new Set(state.prospectus.map(c=> prospectusDupKey(c.program, c.yearLabel, c.term, c.code)));
+  prospectusReviewRows.forEach(c=>{
+    if(!c.program || !c.code || !c.title || !c.yearLabel || !c.term){ skipped++; return; }
+    const term = normalizeTermValue(c.term);
+    const key = prospectusDupKey(c.program, c.yearLabel, term, c.code);
+    if(seen.has(key)){ duplicates++; return; }
+    seen.add(key);
+    state.prospectus.push({
+      id: genId("psc"),
+      program: c.program,
+      year: YEAR_LABEL_TO_NUM[c.yearLabel] || null,
+      yearLabel: c.yearLabel, term, code: c.code, title: c.title,
+      units: c.units, lec: c.lec||0, lab: c.lab||0
+    });
+    added++;
+  });
+  saveState();
+  renderProspectus();
+  closeProspectusReviewModal();
+  alert(`Imported ${added} course(s).${duplicates ? ` Skipped ${duplicates} duplicate(s) already in your prospectus.` : ""}${skipped ? ` Skipped ${skipped} row(s) still missing required fields.` : ""}`);
+});
+
+function updateTargetTermHint(){
+  const hint = document.getElementById("target-term-hint");
+  if(!hint) return;
+  if(!state.targetTerm){ hint.textContent = ""; return; }
+  const programCount = distinctPrograms().length;
+  hint.textContent = `Loads every uploaded program's "${state.targetTerm}" courses${programCount>1 ? ` (${programCount} programs)` : ""}. Each program's own year level is checked separately — different programs (or different year levels) never block each other.`;
+}
+
+document.getElementById("target-term-select").addEventListener("change",(e)=>{
+  const previousTerm = state.targetTerm;
+  const newTerm = e.target.value;
+
+  // Switching to a different, real term wipes the ENTIRE Subjects tab first, then loads the
+  // newly-selected term fresh — so it always starts from a clean slate instead of mixing in
+  // whatever was listed before. That's destructive (and removes faculty's subject links too),
+  // so confirm first; cancelling reverts the dropdown back to what it was. Selecting
+  // "— none —" just turns the conflict check off and leaves the current subject list alone.
+  if(newTerm && newTerm !== previousTerm && state.subjects.length>0){
+    const proceed = confirm(`Switching Target Semester clears ALL ${state.subjects.length} subject(s) currently in the Subjects tab before loading "${newTerm}". This cannot be undone. Continue?`);
+    if(!proceed){
+      e.target.value = previousTerm; // revert the dropdown, nothing changed
+      return;
+    }
+  }
+
+  state.targetTerm = newTerm;
+  saveState();
+  updateTargetTermHint();
+
+  if(newTerm && newTerm !== previousTerm){
+    if(state.prospectus.length===0){
+      alert(`No prospectus uploaded yet — go to the Prospectus tab and import a CSV or PDF first, then pick a Target Semester here to load its subjects.`);
+      return;
+    }
+    const removedCount = clearAllSubjects();
+    const result = autoPopulateSubjectsForTerm(newTerm);
+    if(removedCount>0 || result.added>0 || result.skipped>0){
+      saveState();
+      renderSubjects();
+      renderFaculty();
+      renderScheduleTab();
+      const parts = [];
+      if(removedCount>0) parts.push(`Cleared ${removedCount} subject(s) from the Subjects tab.`);
+      parts.push(`Loaded ${result.added} subject(s) for ${newTerm}.`);
+      if(result.skipped) parts.push(`${result.skipped} course(s) skipped (already linked to a subject, or had no weekly Lec/Lab hours).`);
+      // Never leave "Loaded 0" unexplained — say plainly why, instead of leaving the user to guess.
+      if(result.added===0 && result.matched===0) parts.push(`No prospectus courses found with Term "${newTerm}" — check the Prospectus tab; Term values must read exactly "First Semester", "Second Semester", or "Summer Term".`);
+      alert(parts.join(" ") + `\n\nReview durations/sessions in the Subjects tab — defaults are a best guess from the prospectus's weekly hours.`);
+    } else {
+      // Never fail silently: this is the case that looks like "nothing happened" — the
+      // prospectus has data, but none of it has a Term that reads exactly "<newTerm>".
+      alert(`No prospectus courses found with Term "${newTerm}". Check the Prospectus tab — your uploaded Term values must read exactly "First Semester", "Second Semester", or "Summer Term" (re-download the CSV template if you're using an older file, since it now also needs a Program column).`);
+    }
+  }
+});
+
+/* ---------------------------------------------------------------------
+   GA PROGRESS / CONVERGENCE MODAL
+--------------------------------------------------------------------- */
+let gaFitnessHistory = [];
+let gaGapHistory = [];
+
+function openGaModal(){
+  gaFitnessHistory = [];
+  gaGapHistory = [];
+  document.getElementById("ga-modal-title").innerHTML = '<span class="ga-spinner" id="ga-spinner"></span>Optimizing Schedule…';
+  document.getElementById("ga-modal-close").style.display = "none";
+  document.getElementById("ga-progress-fill").style.width = "0%";
+  document.getElementById("ga-progress-pct").textContent = "0%";
+  document.getElementById("ga-progress-hint").textContent = "Starting…";
+  ["ga-stat-gen","ga-stat-pop","ga-stat-scheduled","ga-stat-gap","ga-stat-latelab","ga-stat-cohorts"].forEach(id=>{
+    document.getElementById(id).textContent = "–";
+  });
+  document.getElementById("ga-stat-cohorts-tile").style.display = "none";
+  drawGaCharts();
+  document.getElementById("ga-modal-backdrop").classList.add("open");
+}
+function closeGaModal(){
+  document.getElementById("ga-modal-backdrop").classList.remove("open");
+}
+
+function svgPolylinePoints(values, w, h, pad){
+  if(values.length===0) return "";
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = (hi - lo) || 1;
+  const n = values.length;
+  return values.map((v,i)=>{
+    const x = n===1 ? pad : pad + (i/(n-1)) * (w - pad*2);
+    const y = h - pad - ((v - lo) / span) * (h - pad*2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+}
+function setChartYAxis(elId, values){
+  const el = document.getElementById(elId);
+  if(values.length < 2){ el.innerHTML = ""; return; }
+  const hi = Math.max(...values), lo = Math.min(...values);
+  el.innerHTML = `<span>${Math.round(hi).toLocaleString()}</span><span>${Math.round(lo).toLocaleString()}</span>`;
+}
+
+function drawGaCharts(){
+  const fEl = document.getElementById("ga-chart-fitness");
+  const gEl = document.getElementById("ga-chart-gap");
+  const fw = 600, fh = 120, gw = 600, gh = 90, pad = 8;
+
+  if(gaFitnessHistory.length < 2){
+    fEl.innerHTML = "";
+    gEl.innerHTML = "";
+    document.getElementById("ga-chart-fitness-yaxis").innerHTML = "";
+    document.getElementById("ga-chart-gap-yaxis").innerHTML = "";
+    return;
+  }
+  const fPts = svgPolylinePoints(gaFitnessHistory, fw, fh, pad);
+  const fAreaPts = `${pad},${fh-pad} ${fPts} ${fw-pad},${fh-pad}`;
+  fEl.innerHTML = `<polyline class="fillarea" points="${fAreaPts}"></polyline><polyline class="line" points="${fPts}"></polyline>`;
+  setChartYAxis("ga-chart-fitness-yaxis", gaFitnessHistory);
+
+  const gPts = svgPolylinePoints(gaGapHistory, gw, gh, pad);
+  gEl.innerHTML = `<polyline class="line gapline" points="${gPts}"></polyline>`;
+  setChartYAxis("ga-chart-gap-yaxis", gaGapHistory);
+}
+
+// How many trailing generations have shown zero fitness improvement — used to tell the
+// user when the search has effectively converged rather than leaving them guessing.
+function plateauStreak(history){
+  if(history.length===0) return 0;
+  const last = history[history.length-1];
+  let streak = 0;
+  for(let i=history.length-1; i>=0 && history[i]===last; i--) streak++;
+  return streak - 1;
+}
+
+function updateGaModal(progress){
+  document.getElementById("ga-stat-gen").textContent = `${progress.generation} / ${progress.maxGenerations}`;
+  document.getElementById("ga-stat-pop").textContent = progress.popSize;
+  document.getElementById("ga-stat-scheduled").textContent = `${progress.scheduledCount} / ${progress.totalSessions}`;
+  document.getElementById("ga-stat-gap").textContent = progress.gapScore;
+  document.getElementById("ga-stat-latelab").textContent = progress.lateLabCount;
+  // Only shown when a Target Semester is actually loading regular-student cohorts — each
+  // group is one independent program+year-level (e.g. a 4-year program's term has 4 of
+  // these), all being satisfied at once by this same run.
+  const cohortTile = document.getElementById("ga-stat-cohorts-tile");
+  if(progress.cohortGroups>0){
+    cohortTile.style.display = "";
+    document.getElementById("ga-stat-cohorts").textContent = `${progress.cohortGroups} (${progress.studentConflicts} unresolved)`;
+  } else {
+    cohortTile.style.display = "none";
+  }
+
+  gaFitnessHistory.push(progress.fitness);
+  gaGapHistory.push(progress.gapScore);
+  drawGaCharts();
+
+  const pct = clamp(Math.round(100 * progress.generation / progress.maxGenerations), 0, 100);
+  document.getElementById("ga-progress-fill").style.width = pct + "%";
+  document.getElementById("ga-progress-pct").textContent = pct + "%";
+
+  const hintEl = document.getElementById("ga-progress-hint");
+  const plateau = plateauStreak(gaFitnessHistory);
+  if(progress.done){
+    hintEl.textContent = `Converged after ${progress.generation} generation(s).`;
+  } else if(plateau >= 5){
+    hintEl.textContent = `No improvement in the last ${plateau} generations — likely near-optimal, still refining room utilization…`;
+  } else {
+    hintEl.textContent = `Searching for a better arrangement… (${progress.scheduledCount}/${progress.totalSessions} sessions placed so far)`;
+  }
+
+  if(progress.done){
+    document.getElementById("ga-progress-fill").style.width = "100%";
+    document.getElementById("ga-progress-pct").textContent = "100%";
+    document.getElementById("ga-modal-title").textContent = "✅ Optimization Complete";
+    document.getElementById("ga-modal-close").style.display = "";
+  }
+}
+
+document.getElementById("ga-modal-close").addEventListener("click", closeGaModal);
+
+document.getElementById("optimize-btn").addEventListener("click", async ()=>{
+  if(state.subjects.length===0){ alert("Add at least one subject first."); return; }
+  // A room is only required if at least one subject actually needs one — an all-External-
+  // Assignment subject list (every session's room/faculty handled elsewhere) is a valid
+  // scenario the optimizer can run with zero rooms defined.
+  const needsRoom = state.subjects.some(s=>!s.externalAssignment);
+  if(needsRoom && state.rooms.length===0){ alert("Add at least one room first (or mark every subject as External Assignment if none of them need one)."); return; }
+  const btn = document.getElementById("optimize-btn");
+  const status = document.getElementById("optimize-status");
+  btn.disabled = true; btn.textContent = "Optimizing…";
+  status.textContent = "";
+  openGaModal();
+
+  // Let the modal actually paint before the (mostly synchronous, per-generation) GA work begins.
+  await nextTick();
+
+  let result = await optimizeSchedule(updateGaModal);
+
+  btn.disabled = false; btn.textContent = "⚡ Optimize Scheduling";
+  if(!result){
+    closeGaModal();
+    status.textContent = "Nothing to schedule.";
+    return;
+  }
+  result = validateAndSplitConflicts(result);
+  state.schedule = result;
+  saveState();
+  const total = result.assignments.length + result.unscheduled.length;
+  const genInfo = `(GA: ${result.generationsRun} gen × ${result.populationSize} pop)`;
+  status.textContent = result.unscheduled.length===0
+    ? `✅ All ${total} sessions scheduled. ${genInfo}`
+    : `⚠ ${result.assignments.length}/${total} sessions scheduled. ${genInfo}`;
+  renderScheduleTab();
+});
+
+document.getElementById("clear-schedule-btn").addEventListener("click", ()=>{
+  if(!state.schedule) return;
+  if(!confirm("Clear the current schedule result?")) return;
+  state.schedule = null;
+  saveState();
+  document.getElementById("optimize-status").textContent = "";
+  renderScheduleTab();
+});
+
+/* ---------------------------------------------------------------------
+   IMPORT / EXPORT (CSV — opens and edits directly in Excel)
+--------------------------------------------------------------------- */
+function parseCsv(text){
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  const len = text.length;
+  for(let i=0;i<len;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; }
+      } else field += c;
+    } else if(c === '"'){ inQuotes = true; }
+    else if(c === ','){ row.push(field); field = ""; }
+    else if(c === '\r'){ /* skip */ }
+    else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if(field.length>0 || row.length>0){ row.push(field); rows.push(row); }
+  return rows.filter(r => !(r.length===1 && r[0].trim()===""));
+}
+function rowsToCsv(rows){
+  return rows.map(r => r.map(v => `"${String(v==null?"":v).replace(/"/g,'""')}"`).join(",")).join("\n");
+}
+function downloadCsv(filename, rows){
+  const blob = new Blob([rowsToCsv(rows)], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = filename;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+// Reads a CSV File, strips a recognizable header row if present, and hands the remaining
+// data rows to `importFn`; shows the result via `alert` using `summaryFn`. `firstColHint`
+// (lowercase) is the expected header text of column 1 for this import type — e.g. "name" for
+// Rooms/Subjects/Faculty, "program" for Prospectus — checked precisely (rather than a blanket
+// "does this row contain the word 'name' anywhere") so a real data row that happens to start
+// with a similar-looking word is never mistaken for the header and silently dropped, and a
+// header row that DOESN'T contain that hint is never mistaken for data and imported as garbage.
+function handleCsvImport(file, importFn, summaryFn, firstColHint){
+  if(!/\.csv$/i.test(file.name)){
+    alert(`"${file.name}" doesn't look like a CSV file (expected a .csv extension) — pick the right file, or use "Download Template" for the exact format.`);
+    return;
+  }
+  // Accepts either one hint or a list of acceptable ones (e.g. Prospectus recognizes both its
+  // current "Program"-first header AND an older "Year"-first header from before the Program
+  // column existed, so a pre-existing file's header row is still stripped correctly either way).
+  const hints = firstColHint ? (Array.isArray(firstColHint) ? firstColHint : [firstColHint]) : ["name"];
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    let rows;
+    try{ rows = parseCsv(String(reader.result)); }
+    catch(e){ alert("Could not read that file as CSV."); return; }
+    if(rows.length===0){ alert("That file appears to be empty."); return; }
+    const header = rows[0].map(h=>String(h).trim().toLowerCase());
+    const dataRows = hints.includes(header[0]) ? rows.slice(1) : rows;
+    const result = importFn(dataRows);
+    alert(summaryFn(result));
+  };
+  reader.onerror = ()=> alert("Could not read that file.");
+  reader.readAsText(file);
+}
+
+// Availability <-> compact text, e.g. "Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM"
+function serializeAvailability(room){
+  const parts = [];
+  DAYS.forEach(d=>{
+    const arr = room.availability[d];
+    let start = null;
+    for(let i=0;i<=NUM_SLOTS;i++){
+      const on = i<NUM_SLOTS && arr[i];
+      if(on && start===null) start = i;
+      if(!on && start!==null){
+        parts.push(`${d} ${fmtTime(SLOT_TIMES[start])}-${fmtTime(SLOT_TIMES[i-1]+SLOT_LEN)}`);
+        start = null;
+      }
+    }
+  });
+  return parts.join("; ");
+}
+function parseTimeLabel(s){
+  const m = String(s).trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/);
+  if(!m) return null;
+  let h = parseInt(m[1],10) % 12;
+  if(/pm/i.test(m[3])) h += 12;
+  return h*60 + parseInt(m[2],10);
+}
+function parseAvailabilityString(str){
+  if(!str || !String(str).trim()) return null; // blank = caller should default to standard hours
+  const av = makeAvailability();
+  DAYS.forEach(d=> av[d] = new Array(NUM_SLOTS).fill(false));
+  String(str).split(";").map(s=>s.trim()).filter(Boolean).forEach(part=>{
+    const m = part.match(/^(\w+)\s+(.+?)-(.+)$/);
+    if(!m || !DAYS.includes(m[1])) return;
+    const startMin = parseTimeLabel(m[2]), endMin = parseTimeLabel(m[3]);
+    if(startMin==null || endMin==null) return;
+    for(let i=0;i<NUM_SLOTS;i++){
+      if(SLOT_TIMES[i] >= startMin && SLOT_TIMES[i] < endMin) av[m[1]][i] = true;
+    }
+  });
+  return av;
+}
+
+/* --- Rooms --- */
+function exportRoomsCsv(){
+  if(state.rooms.length===0){ alert("No rooms to export yet."); return; }
+  const rows = [["Name","Capacity","Availability"]];
+  state.rooms.forEach(r=> rows.push([r.name, r.capacity||"", serializeAvailability(r)]));
+  downloadCsv("rooms.csv", rows);
+}
+function downloadRoomsTemplate(){
+  downloadCsv("rooms-template.csv", [
+    ["Name","Capacity","Availability"],
+    ["Room 101","40",""],
+    ["Room 102","25","Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM"]
+  ]);
+}
+function importRoomsFromRows(dataRows){
+  let added = 0;
+  dataRows.forEach(cols=>{
+    const name = (cols[0]||"").trim();
+    if(!name) return;
+    const capRaw = parseInt(cols[1],10);
+    state.rooms.push({
+      id: genId("room"), name,
+      capacity: !isNaN(capRaw) && capRaw>0 ? capRaw : null,
+      availability: parseAvailabilityString(cols[2]) || makeAvailability()
+    });
+    added++;
+  });
+  saveState();
+  renderRooms();
+  return added;
+}
+
+/* --- Subjects --- */
+function exportSubjectsCsv(){
+  if(state.subjects.length===0){ alert("No subjects to export yet."); return; }
+  const rows = [["Name","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"]];
+  state.subjects.forEach(s=> rows.push([
+    s.name, s.type, s.durationSlots*SLOT_LEN, s.sessionsPerWeek, s.size||"",
+    s.isSplitPair ? "TRUE" : "FALSE", s.dayPairPref||"", s.isCapacitySplit ? "TRUE" : "FALSE",
+    s.externalAssignment ? "TRUE" : "FALSE"
+  ]));
+  downloadCsv("subjects.csv", rows);
+}
+function downloadSubjectsTemplate(){
+  downloadCsv("subjects-template.csv", [
+    ["Name","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"],
+    ["Calculus 101","LEC","60","3","35","FALSE","","",""],
+    ["Chemistry Lab","LAB","180","2","35","FALSE","","TRUE",""],
+    ["Biology 3-Unit","LEC","180","2","30","TRUE","AUTO","FALSE",""],
+    ["PE 1 (handled by another college)","LEC","120","1","","FALSE","","","TRUE"]
+  ]);
+}
+function importSubjectsFromRows(dataRows){
+  let added = 0, skipped = 0;
+  const dayPairMap = {AUTO:"AUTO", MW:"MW", TTH:"TTh", FSA:"FSa"};
+  dataRows.forEach(cols=>{
+    const name = (cols[0]||"").trim();
+    if(!name) return;
+    const type = (cols[1]||"LEC").trim().toUpperCase()==="LAB" ? "LAB" : "LEC";
+    const minutes = parseInt(cols[2],10);
+    if(isNaN(minutes) || minutes<=0){ skipped++; return; }
+    const durationSlots = clamp(Math.round(minutes/SLOT_LEN), 1, 8);
+    let sessions = parseInt(cols[3],10);
+    if(isNaN(sessions) || sessions<1) sessions = 1;
+    sessions = Math.min(7, sessions);
+    const sizeRaw = parseInt(cols[4],10);
+    const size = !isNaN(sizeRaw) && sizeRaw>0 ? sizeRaw : null;
+    const wantsSplit = (cols[5]||"").trim().toUpperCase()==="TRUE";
+    const dayPairPref = dayPairMap[(cols[6]||"AUTO").trim().toUpperCase()] || "AUTO";
+    const wantsCapacitySplit = (cols[7]||"").trim().toUpperCase()==="TRUE";
+    const externalAssignment = (cols[8]||"").trim().toUpperCase()==="TRUE";
+
+    // Mirror the Add Subject form's own invariants so imported rows behave exactly like
+    // hand-added ones (split modes force their own duration/session values).
+    let finalDurationSlots = durationSlots, finalSessions = sessions;
+    let finalIsSplit = false, finalDayPairPref = null, finalIsCapacitySplit = false;
+    if(type==="LEC" && wantsSplit){
+      finalDurationSlots = 3; finalSessions = 2; finalIsSplit = true; finalDayPairPref = dayPairPref;
+    } else if(type==="LAB" && wantsCapacitySplit){
+      finalSessions = 2; finalIsCapacitySplit = true;
+    }
+
+    state.subjects.push(buildSubjectRecord(
+      name, finalDurationSlots, finalSessions, size,
+      finalIsSplit, finalDayPairPref, type, finalIsCapacitySplit, null, externalAssignment
+    ));
+    added++;
+  });
+  saveState();
+  renderSubjects();
+  return { added, skipped };
+}
+
+/* --- Faculty --- */
+function exportFacultyCsv(){
+  if(state.faculty.length===0){ alert("No faculty to export yet."); return; }
+  const subjectById = {};
+  state.subjects.forEach(s=> subjectById[s.id] = s);
+  const rows = [["Name","SubjectsHandled"]];
+  state.faculty.forEach(f=> rows.push([
+    f.name, f.subjectIds.map(id=> subjectById[id] ? subjectById[id].name : null).filter(Boolean).join("; ")
+  ]));
+  downloadCsv("faculty.csv", rows);
+}
+function downloadFacultyTemplate(){
+  downloadCsv("faculty-template.csv", [
+    ["Name","SubjectsHandled"],
+    ["Engr. Dela Cruz","Calculus 101; Chemistry Lab"],
+    ["Engr. Santos","Chemistry Lab"]
+  ]);
+}
+function importFacultyFromRows(dataRows){
+  let added = 0, unmatchedRefs = 0, externalSkipped = 0;
+  dataRows.forEach(cols=>{
+    const name = (cols[0]||"").trim();
+    if(!name) return;
+    const subjectIds = [];
+    (cols[1]||"").split(";").map(s=>s.trim()).filter(Boolean).forEach(subjName=>{
+      const match = state.subjects.find(s=> s.name.toLowerCase()===subjName.toLowerCase());
+      if(!match){ unmatchedRefs++; return; }
+      // External-Assignment subjects have no faculty of ours to assign (faculty is TBD) —
+      // the optimizer would never actually use this link, so don't silently create it.
+      if(match.externalAssignment){ externalSkipped++; return; }
+      subjectIds.push(match.id);
+    });
+    state.faculty.push({ id: genId("fac"), name, subjectIds });
+    added++;
+  });
+  saveState();
+  renderFaculty();
+  return { added, unmatchedRefs, externalSkipped };
+}
+
+document.getElementById("rooms-export-btn").addEventListener("click", exportRoomsCsv);
+document.getElementById("rooms-template-btn").addEventListener("click", downloadRoomsTemplate);
+document.getElementById("rooms-import-btn").addEventListener("click", ()=> document.getElementById("rooms-import-file").click());
+document.getElementById("rooms-import-file").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(file) handleCsvImport(file, importRoomsFromRows, (n)=> `Imported ${n} room(s).`);
+  e.target.value = "";
+});
+
+document.getElementById("subjects-export-btn").addEventListener("click", exportSubjectsCsv);
+document.getElementById("subjects-template-btn").addEventListener("click", downloadSubjectsTemplate);
+document.getElementById("subjects-import-btn").addEventListener("click", ()=> document.getElementById("subjects-import-file").click());
+document.getElementById("subjects-import-file").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(file) handleCsvImport(file, importSubjectsFromRows, (r)=>
+    `Imported ${r.added} subject(s).${r.skipped ? ` Skipped ${r.skipped} row(s) with an invalid/missing duration.` : ""}`
+  );
+  e.target.value = "";
+});
+
+document.getElementById("faculty-export-btn").addEventListener("click", exportFacultyCsv);
+document.getElementById("faculty-template-btn").addEventListener("click", downloadFacultyTemplate);
+document.getElementById("faculty-import-btn").addEventListener("click", ()=> document.getElementById("faculty-import-file").click());
+document.getElementById("faculty-import-file").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(file) handleCsvImport(file, importFacultyFromRows, (r)=>
+    `Imported ${r.added} faculty member(s).${r.unmatchedRefs ? ` ${r.unmatchedRefs} subject reference(s) not found (import Subjects first, and make sure names match exactly).` : ""}${r.externalSkipped ? ` ${r.externalSkipped} reference(s) skipped — those subjects are marked External Assignment and don't need faculty.` : ""}`
+  );
+  e.target.value = "";
+});
+
+/* ---------------------------------------------------------------------
+   INIT
+--------------------------------------------------------------------- */
+populateDurationSelect();
+populateRoomHoursSelects(document.getElementById("room-open-from"), document.getElementById("room-open-until"));
+refreshSplitUI();
+renderRooms();
+renderSubjects();
+renderFaculty();
+renderProspectus();
+renderScheduleTab();
+
+})();
