@@ -35,7 +35,7 @@
   <section id="tab-rooms" class="tab-content active">
     <div class="panel no-print">
       <h2>Add a Room</h2>
-      <p class="sub">Default availability is every day, 7:30 AM – 9:00 PM. Narrow the open/close times below to override the default for this room (rooms can't open earlier than 7:30 AM or stay open later than 9:00 PM) — or leave them as-is and fine-tune specific days/times afterward with "Edit Availability". For rooms shared with other departments, set <b>Allowable Usage %</b> below 100% to cap how much of the room's open time this app's optimizer is allowed to claim.</p>
+      <p class="sub">Default availability is every day, 7:30 AM – 9:00 PM. Narrow the open/close times below to override the default for this room (rooms can't open earlier than 7:30 AM or stay open later than 9:00 PM) — or leave them as-is and fine-tune specific days/times afterward with "Edit Availability". <b>Room Type</b> is a hard scheduling constraint — a <b>LEC Only</b> room is never offered to a Laboratory subject and a <b>LAB Only</b> room is never offered to a Lecture subject; leave it at <b>Both</b> for a room that can host either. For rooms shared with other departments, set <b>Allowable Usage %</b> below 100% to cap how much of the room's open time this app's optimizer is allowed to claim.</p>
       <div class="form-row" id="room-form">
         <div class="field">
           <label>Room Name</label>
@@ -44,6 +44,14 @@
         <div class="field">
           <label>Capacity (optional)</label>
           <input type="number" id="room-capacity" placeholder="e.g. 40" min="1" style="width:110px;">
+        </div>
+        <div class="field">
+          <label>Room Type</label>
+          <select id="room-type" style="min-width:150px;">
+            <option value="BOTH" selected>LEC / LAB (Both)</option>
+            <option value="LEC">LEC Only</option>
+            <option value="LAB">LAB Only</option>
+          </select>
         </div>
         <div class="field">
           <label>Open From</label>
@@ -78,17 +86,17 @@
   <section id="tab-subjects" class="tab-content">
     <div class="panel no-print">
       <h2>Add a Subject</h2>
-      <p class="sub">Set how long each class session runs and how many sessions per week it needs. Each session is scheduled on a different day. 3-hour <b>Lecture</b> subjects can optionally be split into two 1.5-hour sessions on paired days (Mon+Wed, Tue+Thu, or Fri+Sat), meeting at the same time on both days. <b>Laboratory</b> subjects can optionally be split into 2 identical sections when one room can't fit the whole class — each section keeps the full session length and is scheduled independently. Linking a subject to a <b>Prospectus Course</b> (uploaded in the Prospectus tab) lets the optimizer keep it conflict-free against the other required courses in the same <b>program &amp; year level</b> for regular students — different programs are scheduled together but never block each other. Subjects handled by another college/department can be marked <b>External Assignment</b> — the optimizer will only place their class hours (room shows as TBA, faculty as TBD) while still avoiding conflicts for regular students.</p>
+      <p class="sub">Set how long each class session runs and how many sessions per week it needs. Each session is scheduled on a different day. 3-hour <b>Lecture</b> subjects can optionally be split into two 1.5-hour sessions on paired days (Mon+Wed, Tue+Thu, or Fri+Sat), meeting at the same time on both days. <b>Laboratory</b> subjects can optionally be split into 2 identical sections when one room can't fit the whole class — each section keeps the full session length and is scheduled independently. Linking a subject to a <b>Prospectus Course</b> (uploaded in the Prospectus tab) lets the optimizer keep it conflict-free against the other required courses in the same <b>program &amp; year level</b> for regular students — different programs are scheduled together but never block each other. Subjects handled by another college/department can be marked <b>External Assignment</b> — the optimizer will only place their class hours (room shows as TBA, faculty as TBD) while still avoiding conflicts for regular students. Need multiple identical sections of every subject at once? Use <b>Number of Blocks</b> on the Optimize Schedule tab instead.</p>
       <div class="form-row" id="subject-form">
         <div class="field">
-          <label>Subject Name</label>
-          <input type="text" id="subj-name" placeholder="e.g. Calculus 101" style="min-width:180px;">
+          <label>Code</label>
+          <input type="text" id="subj-name" placeholder="e.g. MATH101" style="min-width:180px;">
         </div>
         <div class="field">
           <label>Type</label>
           <select id="subj-type" style="min-width:110px;">
-            <option value="LEC" selected>Lecture</option>
-            <option value="LAB">Laboratory</option>
+            <option value="LEC" selected>LEC (Lecture)</option>
+            <option value="LAB">LAB (Laboratory)</option>
           </select>
         </div>
         <div class="field">
@@ -172,13 +180,21 @@
 
     <div class="panel">
       <h2>Faculty</h2>
+      <p class="sub">Highlight one faculty member below to see (and delete) their record — subjects are shown by code only.</p>
       <div class="io-toolbar">
         <button class="btn btn-sm btn-ghost" id="faculty-export-btn">⬇ Export CSV</button>
         <button class="btn btn-sm btn-ghost" id="faculty-template-btn">📄 Download Template</button>
         <button class="btn btn-sm btn-ghost" id="faculty-import-btn">⬆ Import CSV</button>
         <input type="file" id="faculty-import-file" accept=".csv,text/csv" style="display:none;">
       </div>
-      <div class="cards" id="faculty-list"></div>
+      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+        <select id="faculty-list-select" size="10" style="flex:1; min-width:220px;"></select>
+        <div style="flex:2; min-width:220px;">
+          <div class="sub" style="margin:0 0 6px;">Subjects handled (codes)</div>
+          <div id="faculty-detail-subjects" class="meta"><span style="color:var(--text-dim);font-size:12px;">Highlight a faculty member to see their subjects.</span></div>
+          <button class="btn btn-sm btn-danger" id="delete-faculty-btn" style="margin-top:12px;" disabled>Delete Selected</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -214,7 +230,7 @@
   <section id="tab-schedule" class="tab-content">
     <div class="panel no-print">
       <h2>Optimize &amp; View Schedule</h2>
-      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot while maximizing room utilization and keeping Laboratory subjects within 7:30 AM–5:00 PM when possible. <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other).</p>
+      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. A room's <b>Room Type</b> (Rooms tab) is a hard constraint: a LEC-only or LAB-only room is never offered to the other subject type. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other).</p>
       <div class="sched-toolbar">
         <button class="btn btn-primary btn-lg" id="optimize-btn">⚡ Optimize Scheduling</button>
         <button class="btn btn-ghost" id="clear-schedule-btn">Clear Result</button>
@@ -227,6 +243,11 @@
         </select>
         <div id="target-term-hint" style="color:var(--text-dim);font-size:12px;margin-top:4px;"></div>
       </div>
+      <div class="field" style="margin-top:12px;">
+        <label>Number of Blocks</label>
+        <input type="number" id="global-blocks-input" min="1" value="1" style="width:80px;">
+        <div style="color:var(--text-dim);font-size:12px;margin-top:4px;">Multiplies every subject listed in the Subjects tab into that many independent, separately-scheduled sections (e.g. 3 blocks of each subject, each competing for its own room/day/time/faculty). Leave at 1 for a single section per subject.</div>
+      </div>
     </div>
 
     <div id="schedule-results"></div>
@@ -236,45 +257,78 @@
   <section id="tab-guide" class="tab-content">
     <div class="panel">
       <h2>📘 Quick Start — Step by Step</h2>
-      <p class="sub">The recommended order to set everything up. Every step's data is saved automatically to your browser as you go.</p>
-      <ol class="guide-steps">
-        <li>
-          <b>Add your Rooms</b> (Rooms tab)
-          <p>Give each room a name and, optionally, a seating capacity. Rooms default to open every day, 7:30 AM – 9:00 PM — the outer bound the app never lets a room go beyond. Narrow the hours at creation ("Open From" / "Open Until"), or fine-tune specific days/times afterward with <b>Edit Availability</b> on the room card. For a room shared with other departments, set <b>Allowable Usage %</b> below 100% — the optimizer will then cap how many of that room's weekly slots it's allowed to book, leaving the rest free for whoever else uses it.</p>
-        </li>
-        <li>
-          <b>(Optional) Upload a Program Prospectus</b> (Prospectus tab)
-          <p>If you want the optimizer to keep <b>regular students</b>' schedules conflict-free, upload your curriculum here first. Type a <b>Program Name</b> (e.g. "BS Electrical Engineering"), then either <b>Import CSV</b> (reliable — download the template for the exact columns) or <b>Upload PDF</b> (best-effort; always review the parsed rows before saving). You can upload multiple degree programs — courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates.</p>
-        </li>
-        <li>
-          <b>Add Subjects</b> (Subjects tab)
-          <p>Add each subject by hand — name, Lecture/Laboratory type, session duration, sessions per week, optional class size — or skip this if you uploaded a prospectus and let Step 5 load them automatically instead. Two special options:</p>
-          <ul>
-            <li><b>Prospectus Course</b> link — ties a subject to an uploaded course so the optimizer keeps it conflict-free against that program's other same-year-level courses.</li>
-            <li><b>External Assignment</b> — check this for subjects handled by another college/department (e.g. NSTP, PE). The optimizer places only the class hours; room shows as <b>TBA</b> and faculty as <b>TBD</b>, with no room/faculty conflict-checking needed.</li>
-          </ul>
-        </li>
-        <li>
-          <b>(Optional) Add Faculty</b> (Faculty tab)
-          <p>List each faculty member's previously-handled subjects. The optimizer only assigns a subject to a listed faculty member and never double-books one across two overlapping sessions — even in different rooms. Leave a subject off every faculty list to schedule it without a faculty-conflict check.</p>
-        </li>
-        <li>
-          <b>Pick a Target Semester</b> (Schedule tab — only if you uploaded a prospectus)
-          <p>Selecting First Semester / Second Semester / Summer Term loads every uploaded program's courses for that term straight into the Subjects tab, and turns on regular-student conflict-checking — kept separate per program <i>and</i> year level, so a 4-year program's term runs 4 independent checks at once without them blocking each other. <b>Switching terms clears the entire Subjects tab first</b> (you'll be asked to confirm) so the new term starts clean.</p>
-        </li>
-        <li>
-          <b>Click "⚡ Optimize Scheduling"</b>
-          <p>A progress modal shows the genetic algorithm converging live — fitness and room-utilization charts, generation/population counters, and (when a Target Semester is active) a Student Cohorts tile showing how many independent cohorts are being satisfied.</p>
-        </li>
-        <li>
-          <b>Review the result</b>
-          <p>Switch the <b>View</b> dropdown between <b>Room Timetable</b>, <b>Faculty Schedule</b> (pick a faculty member to see just their own weekly grid), <b>Regular-Student Schedule</b> (pick a program/year-level cohort to see everything a student in it takes), and <b>List View</b>. Anything that couldn't be placed appears separately under <b>Scheduling Conflicts</b>, split into Room / Faculty / Regular-Student groups, each with a specific reason — use that to decide whether to add a room, adjust availability, or change a subject's settings, then optimize again.</p>
-        </li>
-        <li>
-          <b>Export or print</b>
-          <p>Once you're happy with it, use <b>🖨 Print</b> or <b>⬇ Export CSV</b> on the Schedule tab — both act on whichever room, faculty member, or cohort you currently have selected, so you can hand out a clean per-faculty or per-student-cohort schedule without the rest of the data.</p>
-        </li>
-      </ol>
+      <p class="sub">The recommended order to set everything up, start to finish. Click any step below to jump straight to that tab. Every step's data is saved automatically to your browser as you go.</p>
+      <div class="flow-wrap">
+        <div class="flow-step" role="button" tabindex="0" data-jump="prospectus">
+          <div class="flow-num">1</div>
+          <div class="flow-icon">🎓</div>
+          <div class="flow-body">
+            <div class="flow-title">Upload a Program Prospectus</div>
+            <div class="flow-sub">Prospectus tab</div>
+            <p>Type the <b>Program Name</b> first (e.g. "BS Electrical Engineering") — set it <i>before</i> clicking <b>📄 Upload PDF (Beta)</b>, which requires it and won't proceed otherwise. Then either <b>Import CSV</b> (reliable — download the template for the exact columns) or <b>Upload PDF</b> (best-effort; always review the parsed rows before saving). Repeat for more than one degree program if needed.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+          <div class="flow-num">2</div>
+          <div class="flow-icon">🗓️</div>
+          <div class="flow-body">
+            <div class="flow-title">Select the Target Semester to be optimized</div>
+            <div class="flow-sub">Optimize Schedule tab</div>
+            <p>Pick First Semester / Second Semester / Summer Term — this auto-loads every uploaded program's courses for that term straight into the Subjects tab, and turns on regular-student conflict-checking (kept separate per program <i>and</i> year level). No prospectus uploaded? Add subjects by hand instead in the Subjects tab.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="subjects">
+          <div class="flow-num">3</div>
+          <div class="flow-icon">📚</div>
+          <div class="flow-body">
+            <div class="flow-title">Add Subjects accordingly</div>
+            <div class="flow-sub">Subjects tab</div>
+            <p>Check, verify, add, or modify the subjects reflected here. If Step 2 auto-loaded a program's courses, review the list — durations/sessions are a best-effort guess from the prospectus's weekly hours. No prospectus? Add each subject by hand: Code, Lecture/Laboratory type, session duration, sessions per week. Click <b>Mark External</b> on a subject if it's handled and managed by another department — the optimizer then assigns it a <b>TBA</b> room and <b>TBD</b> faculty instead of matching a real room/instructor.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="rooms">
+          <div class="flow-num">4</div>
+          <div class="flow-icon">🏫</div>
+          <div class="flow-body">
+            <div class="flow-title">Add Rooms accordingly</div>
+            <div class="flow-sub">Rooms tab</div>
+            <p>Add each room your department can use — name, optional seating capacity, and hours (defaults to every day, 7:30 AM–9:00 PM). For a room shared with other departments, set <b>Allowable Usage %</b> below 100% so the optimizer only claims its fair share.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="faculty">
+          <div class="flow-num">5</div>
+          <div class="flow-icon">👤</div>
+          <div class="flow-body">
+            <div class="flow-title">Add Faculty</div>
+            <div class="flow-sub">Faculty tab</div>
+            <p>Add one faculty member at a time and multi-highlight the subject codes they've previously handled. The optimizer only assigns a subject to a listed faculty member, and never double-books one across overlapping sessions — even in different rooms.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+          <div class="flow-num">6</div>
+          <div class="flow-icon">⚡</div>
+          <div class="flow-body">
+            <div class="flow-title">Set Number of Blocks and run the optimization</div>
+            <div class="flow-sub">Optimize Schedule tab</div>
+            <p>Set <b>Number of Blocks</b> to how many parallel sections per subject/program you need considered (e.g. 3 blocks of every subject, each scheduled independently) — leave at 1 for a single section. Then click <b>⚡ Optimize Scheduling</b> and watch the genetic algorithm converge live.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+          <div class="flow-num">7</div>
+          <div class="flow-icon">📋</div>
+          <div class="flow-body">
+            <div class="flow-title">Review the results below</div>
+            <div class="flow-sub">Optimize Schedule tab — Schedule Results section</div>
+            <p>Switch <b>View</b> between <b>Room Timetable</b>, <b>Faculty Schedule</b>, <b>Regular-Student Schedule</b>, and <b>List View</b> — pick the specific room/faculty member/cohort from the dropdown next to it. Anything unplaced appears under <b>Scheduling Conflicts</b> with a specific reason. Finish with <b>🖨 Print</b> or <b>⬇ Export CSV</b>.</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -388,6 +442,9 @@
       <div class="ga-stat"><div class="label">Scheduled</div><b id="ga-stat-scheduled">–</b></div>
       <div class="ga-stat"><div class="label">Idle Room-Slots</div><b id="ga-stat-gap">–</b></div>
       <div class="ga-stat"><div class="label">Late Labs</div><b id="ga-stat-latelab">–</b></div>
+      <div class="ga-stat"><div class="label">Friday Sessions</div><b id="ga-stat-friday">–</b></div>
+      <div class="ga-stat"><div class="label">Faculty w/o Break</div><b id="ga-stat-nobreak">–</b></div>
+      <div class="ga-stat"><div class="label">Faculty Idle Slots</div><b id="ga-stat-facgap">–</b></div>
       <div class="ga-stat" id="ga-stat-cohorts-tile" style="display:none;"><div class="label">Student Cohorts</div><b id="ga-stat-cohorts">–</b></div>
     </div>
 

@@ -26,9 +26,18 @@ const COLORS = ["#7a1f33","#4a5568","#b3791f","#3d6b4f","#6b3fa0","#8c2f45","#2f
                 "#a0522d","#5a6b1f","#9c4a6a","#3a4a5c","#b0651f","#4a7a6b","#6b2f4a"];
 
 // Preferred paired-day combinations for split 3-hour subjects (1.5h x2), in priority order.
+// Listing FSa (Fri/Sat) last means the AUTO picker only reaches for a Friday-anchored pair
+// once Mon/Wed and Tue/Thu are unavailable — the split-pair half of the Friday energy-saving
+// preference (constraint #4); the "single"-task placement path applies the rest.
 const DAY_PAIRS = { MW:["Mon","Wed"], TTh:["Tue","Thu"], FSa:["Fri","Sat"] };
 const DAY_PAIR_ORDER = ["MW","TTh","FSa"];
 const DAY_PAIR_LABELS = { AUTO:"Auto (best available)", MW:"Mon & Wed", TTh:"Tue & Thu", FSa:"Fri & Sat" };
+
+// No subject may be scheduled on Sunday except these two course codes (NSTP, which
+// conventionally meets on Sundays) — constraint #1. Matched against a linked prospectus
+// course's code, or the subject's own name as a fallback for manually-added subjects.
+const SUNDAY_EXEMPT_CODES = ["NST001","NST002"];
+const NON_SUNDAY_DAYS = DAYS.filter(d=> d!=="Sun");
 
 // Sentinel "room" for External-Assignment subjects — no real room is booked (handled by
 // another college/department), so these get a placeholder id/name instead of a real roomId,
@@ -87,6 +96,7 @@ let state = {
   faculty: [], // [{id, name, subjectIds:[...]}]
   prospectus: [], // [{id, year, yearLabel, term, code, title, units, lec, lab}]
   targetTerm: "", // "<yearLabel>|<term>" — the regular-student cohort the optimizer keeps conflict-free
+  blocks: 1, // Number of Blocks (Optimize Schedule tab) — multiplies every subject into this many independent sections
   schedule: null // {assignments:[...], unscheduled:[...], stats:{...}}
 };
 
@@ -136,6 +146,7 @@ function loadState(){
         state.faculty = Array.isArray(parsed.faculty) ? parsed.faculty : [];
         state.prospectus = Array.isArray(parsed.prospectus) ? parsed.prospectus : [];
         state.targetTerm = typeof parsed.targetTerm === "string" ? parsed.targetTerm : "";
+        state.blocks = Number.isFinite(parsed.blocks) && parsed.blocks>=1 ? Math.round(parsed.blocks) : 1;
         state.schedule = parsed.schedule || null;
 
         let migratedAny = false;
@@ -223,7 +234,7 @@ function populateRoomHoursSelects(fromSel, untilSel, defaultFrom, defaultUntil){
   ).join("");
 }
 
-function addRoom(name, capacity, openMin, closeMin, usageLimitPercent){
+function addRoom(name, capacity, openMin, closeMin, usageLimitPercent, roomType){
   state.rooms.push({
     id: genId("room"),
     name: name,
@@ -232,7 +243,10 @@ function addRoom(name, capacity, openMin, closeMin, usageLimitPercent){
     // Shared-room cap: the optimizer will never book more than this % of the room's total
     // weekly open slots, leaving the rest free for whoever else the room is shared with.
     // Defaults to 100 (fully ours) for both new rooms and any imported/legacy data.
-    usageLimitPercent: (usageLimitPercent==null || usageLimitPercent==="") ? 100 : usageLimitPercent
+    usageLimitPercent: (usageLimitPercent==null || usageLimitPercent==="") ? 100 : usageLimitPercent,
+    // "BOTH" (default, incl. any room from before this field existed) can host either type;
+    // "LEC" / "LAB" is a hard constraint — the optimizer never offers it to the other type.
+    roomType: (roomType==="LEC"||roomType==="LAB") ? roomType : "BOTH"
   });
   saveState();
   renderRooms();
@@ -272,16 +286,19 @@ function renderRooms(){
     list.innerHTML = '<div class="empty">No rooms yet. Add one above.</div>';
     return;
   }
+  const roomTypeLabels = { BOTH:"LEC/LAB", LEC:"LEC Only", LAB:"LAB Only" };
   list.innerHTML = state.rooms.map(r=>{
     const total = DAYS.length*NUM_SLOTS;
     const avail = availableSlotCount(r);
     const usagePct = r.usageLimitPercent==null ? 100 : r.usageLimitPercent;
     const sharedTag = usagePct<100 ? ` &nbsp;•&nbsp; <span class="tag-external" title="This app's optimizer will only book up to ${usagePct}% of this room's open slots — the rest stays free for other shared use.">🔀 Shared: ${usagePct}% (max ${maxAllowedSlots(r)} slots)</span>` : "";
+    const roomType = r.roomType==="LEC"||r.roomType==="LAB" ? r.roomType : "BOTH";
+    const typeTag = roomType!=="BOTH" ? ` &nbsp;•&nbsp; <span class="tag-${roomType.toLowerCase()}">${roomTypeLabels[roomType]}</span>` : "";
     return `<div class="card" data-id="${r.id}">
       <div class="icon">🏫</div>
       <div class="info">
         <div class="name">${escapeHtml(r.name)}</div>
-        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week${sharedTag}</div>
+        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week${typeTag}${sharedTag}</div>
       </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" data-action="edit-avail" data-id="${r.id}">Edit Availability</button>
@@ -408,19 +425,48 @@ function renderSubjects(){
 /* ---------------------------------------------------------------------
    FACULTY
 --------------------------------------------------------------------- */
+// The course CODE to show for a subject wherever Faculty needs it: the linked prospectus
+// course's actual CourseCode when there is one (auto-populated subjects are named after the
+// course TITLE, e.g. "Chemistry for Engineers Laboratory", not its code), otherwise the
+// subject's own name (which IS the code for manually-added subjects — see the Subjects tab).
+function subjectCodeLabel(s){
+  if(s.prospectusCourseId){
+    const course = state.prospectus.find(c=>c.id===s.prospectusCourseId);
+    if(course && course.code) return course.code;
+  }
+  return s.name;
+}
 function populateFacultySubjectSelect(){
   const sel = document.getElementById("faculty-subjects");
   if(!sel) return;
   const prevSelected = new Set(Array.from(sel.selectedOptions).map(o=>o.value));
   // External-Assignment subjects have no faculty of ours to assign (faculty is TBD, handled
-  // by another college), so they're left out of this list entirely.
+  // by another college), so they're left out of this list entirely. Shown by course code only.
   sel.innerHTML = state.subjects.filter(s=>!s.externalAssignment).map(s=>{
-    const type = s.type === "LAB" ? "LAB" : "LEC";
-    return `<option value="${s.id}" ${prevSelected.has(s.id)?"selected":""}>[${type}] ${escapeHtml(s.name)}</option>`;
+    return `<option value="${s.id}" ${prevSelected.has(s.id)?"selected":""}>${escapeHtml(subjectCodeLabel(s))}</option>`;
   }).join("");
 }
 
+// Case/whitespace-insensitive name match — same identity rule used for prospectus-course
+// duplicate detection elsewhere in the app.
+function findFacultyByName(name){
+  const key = String(name||"").trim().toLowerCase();
+  return state.faculty.find(f=> f.name.trim().toLowerCase()===key);
+}
+// Adding a faculty member whose name already exists doesn't create a second entry — the
+// newly-picked subjects are merged (deduplicated) into the existing faculty's handled-subject
+// list instead, so re-adding the same name is how you extend what they teach.
 function addFaculty(name, subjectIds){
+  const existing = findFacultyByName(name);
+  if(existing){
+    const merged = new Set(existing.subjectIds);
+    (subjectIds||[]).forEach(id=> merged.add(id));
+    existing.subjectIds = Array.from(merged);
+    saveState();
+    renderFaculty();
+    trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:true } });
+    return;
+  }
   state.faculty.push({
     id: genId("fac"),
     name: name,
@@ -428,7 +474,7 @@ function addFaculty(name, subjectIds){
   });
   saveState();
   renderFaculty();
-  trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length } });
+  trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:false } });
 }
 function deleteFaculty(id){
   if(!confirm("Delete this faculty member? This cannot be undone.")) return;
@@ -438,36 +484,43 @@ function deleteFaculty(id){
   trackEvent("deleteFaculty");
 }
 
+// Faculty roster is a single-select listbox (highlight one faculty member at a time) — the
+// highlighted one's handled-subject codes are shown in the detail panel next to it, and
+// "Delete Selected" acts on whichever row is highlighted.
 function renderFaculty(){
   const badge = document.getElementById("badge-faculty");
   if(badge) badge.textContent = state.faculty.length;
-  const list = document.getElementById("faculty-list");
-  if(!list) return;
+  const sel = document.getElementById("faculty-list-select");
+  if(!sel) return;
+  const prevSelectedId = sel.value;
   if(state.faculty.length===0){
-    list.innerHTML = '<div class="empty">No faculty yet. Add one above.</div>';
+    sel.innerHTML = '<option value="" disabled>No faculty yet. Add one above.</option>';
+  } else {
+    sel.innerHTML = state.faculty.map(f=> `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join("");
+    if(state.faculty.some(f=>f.id===prevSelectedId)) sel.value = prevSelectedId;
+  }
+  renderFacultyDetail();
+}
+function renderFacultyDetail(){
+  const sel = document.getElementById("faculty-list-select");
+  const detail = document.getElementById("faculty-detail-subjects");
+  const delBtn = document.getElementById("delete-faculty-btn");
+  if(!sel || !detail || !delBtn) return;
+  const f = state.faculty.find(x=>x.id===sel.value);
+  if(!f){
+    detail.innerHTML = `<span style="color:var(--text-dim);font-size:12px;">Highlight a faculty member to see their subjects.</span>`;
+    delBtn.disabled = true;
     return;
   }
+  delBtn.disabled = false;
   const subjectById = {};
   state.subjects.forEach(s=> subjectById[s.id]=s);
-  list.innerHTML = state.faculty.map(f=>{
-    const chips = f.subjectIds.length
-      ? f.subjectIds.map(sid=>{
-          const s = subjectById[sid];
-          if(!s) return "";
-          return `<span class="faculty-subject-chip">${escapeHtml(s.name)}</span>`;
-        }).join("")
-      : `<span style="color:var(--text-dim);font-size:12px;">No subjects listed yet — won't be conflict-checked</span>`;
-    return `<div class="card" data-id="${f.id}" style="align-items:flex-start;">
-      <div class="icon">👤</div>
-      <div class="info">
-        <div class="name">${escapeHtml(f.name)}</div>
-        <div class="meta" style="margin-top:6px;">${chips}</div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-sm btn-danger" data-action="delete-faculty" data-id="${f.id}">Delete</button>
-      </div>
-    </div>`;
-  }).join("");
+  detail.innerHTML = f.subjectIds.length
+    ? f.subjectIds.map(sid=>{
+        const s = subjectById[sid];
+        return s ? `<span class="faculty-subject-chip">${escapeHtml(subjectCodeLabel(s))}</span>` : "";
+      }).join("")
+    : `<span style="color:var(--text-dim);font-size:12px;">No subjects listed yet — won't be conflict-checked</span>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -515,8 +568,19 @@ function buildCohortGroups(){
 // so multiple degree programs' full course load for that term is ready to optimize together
 // with no manual re-entry. Idempotent: a course that already has a linked subject is skipped,
 // so re-running (e.g. after adding more prospectus courses) never creates duplicates.
-// Best-effort duration defaults are derived from the prospectus's weekly Lec/Lab hours
-// (1-hour LEC sessions, one weekly LAB block) — review/adjust afterward in the Subjects tab.
+//
+// Duration/session shape is derived from the prospectus's weekly Lec/Lab hours per the
+// scheduling constraints (review/adjust afterward in the Subjects tab):
+//   LEC — for 3+ units: weekly lecture hours ÷ 2 = each session's length, met twice a week
+//         at the same time, on the Mon/Wed, Tue/Thu, or Fri/Sat counterpart days (constraint
+//         #2). Under 3 units doesn't need that split: one weekly session at the full
+//         duration, met once a week instead (constraint #5).
+//   LAB — weekly lab hours (already units x3 by convention) stay one weekly block up to
+//         3 hours; beyond that, split into fixed 3-hour sessions — hours ÷ 3 = sessions/week,
+//         each placed on whatever day works best (constraint #3).
+// NST001/NST002 (NSTP) are ALSO kept to a single weekly block regardless of units: the
+// twice-a-week pairing can never land on Sunday, but NSTP conventionally meets there
+// (constraint #1's Sunday exception).
 function autoPopulateSubjectsForTerm(term){
   if(!term) return { added:0, skipped:0, matched:0 };
   const courses = state.prospectus.filter(c=> normalizeTermValue(c.term)===term);
@@ -528,17 +592,37 @@ function autoPopulateSubjectsForTerm(term){
     const lec = c.lec || 0, lab = c.lab || 0;
     if(lec<=0 && lab<=0){ skipped++; return; }
     const tag = c.program ? ` [${c.program}]` : "";
+    const isSundayExempt = SUNDAY_EXEMPT_CODES.includes((c.code||"").trim().toUpperCase());
     if(lec>0){
-      state.subjects.push(buildSubjectRecord(
-        c.title + tag, 2 /* 1 hour */, clamp(Math.round(lec), 1, 7), null,
-        false, null, "LEC", false, c.id, false
-      ));
+      // lec hours/week is also the lecture unit count by convention (1 unit = 1 hr/week) —
+      // under 3 units skips the twice-a-week split, same as the Sunday-exempt case.
+      if(isSundayExempt || lec < 3){
+        const slots = clamp(Math.round(lec*2), 1, 16); // one weekly block sized to full lec hours
+        state.subjects.push(buildSubjectRecord(
+          c.title + tag, slots, 1, null,
+          false, null, "LEC", false, c.id, false
+        ));
+      } else {
+        const perSessionSlots = clamp(Math.round(lec), 1, 16); // (lec hrs / 2) x 2 slots/hr = lec
+        state.subjects.push(buildSubjectRecord(
+          c.title + tag, perSessionSlots, 2, null,
+          true, "AUTO", "LEC", false, c.id, false
+        ));
+      }
       added++;
     }
     if(lab>0){
-      const labSlots = clamp(Math.round(lab*2), 1, 8); // one weekly block, capped at 4h/session
+      const totalLabSlots = clamp(Math.round(lab*2), 1, 999); // weekly lab hours -> 30min slots
+      let labDurationSlots, labSessions;
+      if(totalLabSlots <= 6){ // <=3 hours: one weekly block
+        labDurationSlots = totalLabSlots;
+        labSessions = 1;
+      } else { // >3 hours: fixed 3-hour sessions, hours/week / 3 = sessions/week
+        labDurationSlots = 6;
+        labSessions = clamp(Math.round(totalLabSlots/6), 1, 7);
+      }
       state.subjects.push(buildSubjectRecord(
-        c.title + (lec>0 ? " (Lab)" : "") + tag, labSlots, 1, null,
+        c.title + (lec>0 ? " (Lab)" : "") + tag, labDurationSlots, labSessions, null,
         false, null, "LAB", false, c.id, false
       ));
       added++;
@@ -902,13 +986,44 @@ document.getElementById("avail-modal-backdrop").addEventListener("click", (e)=>{
    task the best still-free (room, day, start-slot, faculty) it can find —
    respecting room availability & capacity, faculty qualification &
    non-overlap (checked globally across all rooms), one-session-per-day per
-   subject, and a soft same-day/before-5PM preference for Laboratory
-   subjects. The GA evolves populations of orderings via tournament
-   selection, order crossover (OX) and swap mutation, scoring each decoded
-   result by (1) sessions scheduled, (2) room-utilization (packing density,
-   fewer half-empty room-days), (3) lab sessions kept within 7:30AM-5:00PM.
+   subject, no Sunday sessions except NST001/NST002 (constraint #1), Room
+   Type (LEC/LAB/Both) honored as a hard room constraint (constraint #1b),
+   and a soft same-day/before-6PM preference for Laboratory subjects plus a
+   soft Friday-avoidance preference for energy savings (constraint #4). The
+   GA also softly steers each faculty member toward keeping a free
+   10:30AM-12:00NN or 12:00NN-1:30PM break (constraint #3) and away from
+   large idle gaps in their daily schedule (constraint #4b). The GA evolves
+   populations of orderings via tournament selection, order crossover (OX)
+   and swap mutation, scoring each decoded result by (1) sessions
+   scheduled, (2) room-utilization (packing density, fewer half-empty
+   room-days), (3) lab sessions kept within 7:30AM-6:00PM, (4) fewer Friday
+   sessions, (5) faculty break windows honored, (6) tighter faculty
+   daily schedules.
 --------------------------------------------------------------------- */
-const LAB_PREFERRED_END_MIN = 17*60; // 5:00 PM — soft cutoff for Laboratory subjects
+const LAB_PREFERRED_END_MIN = 18*60; // 6:00 PM — soft cutoff for Laboratory subjects (constraint #2)
+
+// Constraint #3: the optimizer tries to keep at least ONE of these two windows completely
+// free of classes, for every faculty member, across the whole week (a guaranteed break) —
+// soft/best-effort, same as the other "if possible" preferences here.
+const FACULTY_BREAK_WINDOWS = [
+  { start: 10*60+30, end: 12*60 },   // 10:30 AM – 12:00 NN
+  { start: 12*60, end: 13*60+30 }    // 12:00 NN – 1:30 PM
+].map(w=> Object.assign({}, w, { slots: SLOT_TIMES.map((t,i)=> (t>=w.start && t<w.end) ? i : -1).filter(i=>i>=0) }));
+
+// Constraint #1: is this subject one of the Sunday exceptions (NST001/NST002 — NSTP)? Checks
+// the linked prospectus course's code first, falling back to the subject's own name so a
+// manually-added "NST001 ..." subject (no prospectus link) is still recognized.
+function isSundayExemptSubject(s){
+  const course = s.prospectusCourseId ? state.prospectus.find(c=>c.id===s.prospectusCourseId) : null;
+  if(course && SUNDAY_EXEMPT_CODES.includes((course.code||"").trim().toUpperCase())) return true;
+  const name = (s.name||"").toUpperCase();
+  return SUNDAY_EXEMPT_CODES.some(code=> name.includes(code));
+}
+// Which days a task may be placed on: every day for a Sunday-exempt subject, otherwise every
+// day except Sunday. Paired (MW/TTh/FSa) tasks never reach Sunday in the first place, so this
+// only matters for "single"-task placement (regular multi-session and Lab subjects).
+function candidateDaysFor(task){ return task.allowSunday ? DAYS : NON_SUNDAY_DAYS; }
+
 // subjectId -> [facultyId, ...] qualified/previously-handled faculty for that subject.
 function buildSubjectFacultyMap(){
   const map = {};
@@ -921,7 +1036,15 @@ function buildSubjectFacultyMap(){
   return map;
 }
 
-function buildTasks(){
+// `blocks` (from the Optimize Schedule tab, default 1) multiplies EVERY subject into that many
+// independent, separately-scheduled copies — e.g. 3 parallel sections of the same course, each
+// competing for its own room/day/time/faculty. subjectId (faculty qualification, cohort
+// membership, color) stays the real subject's id, shared by every block; each block instead
+// gets its own `instanceKey`, used only to keep that ONE block/section's own sessions spread
+// across different days — so different blocks (and, for a room-capacity Lab split, different
+// sections within a block) never block each other off a day the way same-subject sessions do.
+function buildTasks(blocks){
+  blocks = Math.max(1, parseInt(blocks,10) || 1);
   const tasks = [];
   const facultyMap = buildSubjectFacultyMap();
   const cohortGroups = buildCohortGroups(); // subjectId -> "program|yearLabel" cohort key, or absent
@@ -930,24 +1053,35 @@ function buildTasks(){
     const cohortGroup = cohortGroups[s.id] || null; // must not overlap other required courses in the same program+year
     const isCohort = !!cohortGroup;
     const externalAssignment = !!s.externalAssignment; // true = no room/faculty, class hours only (TBA/TBD)
-    if(s.isSplitPair){
-      // One atomic task representing both 1.5h halves, placed on a matching day-pair at the same time.
-      tasks.push({
-        type: "paired",
-        subjectId:s.id, subjectName:s.name, durationSlots:s.durationSlots,
-        size:s.size, color:s.color, dayPairPref:s.dayPairPref,
-        sortWeight: s.durationSlots*2, facultyIds, isCohort, cohortGroup, externalAssignment
-      });
-    } else {
-      // Lab subjects split for room capacity produce 2 identical full-length sessions
-      // (e.g. Section 1 / Section 2), each scheduled independently — no same-time/room constraint.
-      for(let i=0;i<s.sessionsPerWeek;i++){
+    const allowSunday = isSundayExemptSubject(s); // constraint #1: Sunday only for NST001/NST002
+    for(let b=0;b<blocks;b++){
+      // Schedule output (Room/Faculty/Student views, List View, CSV) shows the course CODE
+      // only — not the full prospectus title — to keep the plotted tables from getting
+      // crowded; subjectCodeLabel() resolves the linked prospectus course's code when there
+      // is one, otherwise falls back to the subject's own name (already a code, manually).
+      const code = subjectCodeLabel(s);
+      const subjectName = blocks>1 ? `${code}-${b+1}` : code;
+      if(s.isSplitPair){
+        // One atomic task representing both 1.5h halves, placed on a matching day-pair at the same time.
         tasks.push({
-          type:"single", subjectId:s.id, subjectName:s.name, durationSlots:s.durationSlots,
-          size:s.size, color:s.color, sessionIndex:i, sortWeight:s.durationSlots,
-          subjectType: s.type, labSection: s.isCapacitySplit ? (i+1) : null,
-          facultyIds, isCohort, cohortGroup, externalAssignment
+          type: "paired",
+          subjectId:s.id, subjectName, durationSlots:s.durationSlots, subjectType: s.type,
+          size:s.size, color:s.color, dayPairPref:s.dayPairPref, blockIndex:b,
+          sortWeight: s.durationSlots*2, facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday
         });
+      } else {
+        // Lab subjects split for room capacity produce 2 identical full-length sessions
+        // (e.g. Section 1 / Section 2), each scheduled independently — no same-time/room/day
+        // constraint between sections, so each gets its own instanceKey.
+        for(let i=0;i<s.sessionsPerWeek;i++){
+          const instanceKey = s.isCapacitySplit ? `${s.id}::b${b}::sec${i}` : `${s.id}::b${b}`;
+          tasks.push({
+            type:"single", subjectId:s.id, subjectName, durationSlots:s.durationSlots,
+            size:s.size, color:s.color, sessionIndex:i, sortWeight:s.durationSlots, blockIndex:b,
+            subjectType: s.type, labSection: s.isCapacitySplit ? (i+1) : null, instanceKey,
+            facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday
+          });
+        }
       }
     }
   });
@@ -978,8 +1112,16 @@ function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
   return freeOnes[Math.floor(Math.random()*freeOnes.length)];
 }
 
-function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc){
+// Room Type is a hard constraint: "LEC" or "LAB" only ever hosts that one subject type;
+// "BOTH" (default, incl. any room predating this field) hosts either.
+function roomAllowsType(room, subjectType){
+  const rt = room.roomType==="LEC"||room.roomType==="LAB" ? room.roomType : "BOTH";
+  return rt==="BOTH" || rt===subjectType;
+}
+
+function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType){
   if(usedDaysForSubject.has(day)) return [];
+  if(!roomAllowsType(room, subjectType)) return [];
   if(size && room.capacity && room.capacity < size) return [];
   // Shared-room cap: this session's slots would push the room's weekly booked total past the
   // usageLimitPercent budget it's allowed to claim — skip the room entirely for this task.
@@ -1046,7 +1188,8 @@ function findScheduleOnlyPairedCandidates(pairKey, durationSlots, isCohort, coho
 // Finds (start-slot) candidates in `room` for a paired subject on a specific day-pair,
 // requiring BOTH days to be free/available at the same start slot (same time, same room),
 // AND a qualified faculty member free on both days at that same time.
-function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc){
+function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType){
+  if(!roomAllowsType(room, subjectType)) return [];
   if(size && room.capacity && room.capacity < size) return [];
   // Same shared-room budget check as findCandidates, but a paired session books durationSlots
   // on BOTH days of the pair, so it costs durationSlots*2 against the room's weekly cap.
@@ -1087,8 +1230,8 @@ function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyId
    "couldn't schedule" — and can tell at a glance whether it's a room
    problem or a faculty problem.
 --------------------------------------------------------------------- */
-function roomHasStaticBlock(room, durationSlots, excludeDays){
-  return DAYS.some(d=>{
+function roomHasStaticBlock(room, durationSlots, excludeDays, days){
+  return (days||DAYS).some(d=>{
     if(excludeDays && excludeDays.has(d)) return false;
     const avail = room.availability[d];
     for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
@@ -1099,8 +1242,8 @@ function roomHasStaticBlock(room, durationSlots, excludeDays){
     return false;
   });
 }
-function roomHasFreeBlock(room, durationSlots, occ, excludeDays){
-  return DAYS.some(d=>{
+function roomHasFreeBlock(room, durationSlots, occ, excludeDays, days){
+  return (days||DAYS).some(d=>{
     if(excludeDays && excludeDays.has(d)) return false;
     const avail = room.availability[d], occArr = occ[room.id][d];
     for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
@@ -1124,8 +1267,8 @@ function facultyNamesFor(facultyIds){
 // hard constraints (faculty, regular-student cohort) is actually the blocker by checking
 // each one independently (the other ignored) — so the diagnosis names the real cause
 // instead of defaulting to "faculty" whenever a cohort conflict is the true reason.
-function anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, facultyIds, facultyOcc){
-  return bigEnough.some(room=> DAYS.some(d=>{
+function anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, facultyIds, facultyOcc, days){
+  return bigEnough.some(room=> (days||DAYS).some(d=>{
     if(usedDaysForSubject.has(d)) return false;
     const avail = room.availability[d], occArr = occ[room.id][d];
     for(let start=0; start+durationSlots<=NUM_SLOTS; start++){
@@ -1138,8 +1281,8 @@ function anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject
     return false;
   }));
 }
-function anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc){
-  return bigEnough.some(room=> DAYS.some(d=>{
+function anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc, days){
+  return bigEnough.some(room=> (days||DAYS).some(d=>{
     if(usedDaysForSubject.has(d)) return false;
     const avail = room.availability[d], occArr = occ[room.id][d];
     const cohortArr = isCohort ? cohortOcc[d] : null;
@@ -1159,28 +1302,43 @@ function cohortGroupLabel(cohortGroup){
   if(!cohortGroup) return "the same regular-student cohort";
   return cohortGroup.split("|").join(" — ");
 }
+// The Regular-Student Schedule selector/grid is keyed by (cohortGroup, block) together, not
+// just cohortGroup — with 2+ blocks, each block is a different sub-group of students (e.g.
+// two parallel sections), so mixing their courses into one table would show a subject twice
+// for no reason and falsely imply one student takes both. These two helpers convert between
+// that composite key and its parts.
+function cohortCompositeKey(group, blockIndex){ return group + "::b" + (blockIndex||0); }
+function parseCohortComposite(key){
+  const idx = key.lastIndexOf("::b");
+  return { group: key.slice(0, idx), blockIndex: parseInt(key.slice(idx+3), 10) || 0 };
+}
 function diagnoseSingleTask(task, occ, usedDaysForSubject, isCohort, cohortOcc, facultyOcc){
   const size = task.size, durationSlots = task.durationSlots;
-  const bigEnough = state.rooms.filter(r => !size || !r.capacity || r.capacity>=size);
+  const days = candidateDaysFor(task); // constraint #1: Sunday excluded unless NST001/NST002
+  const typeOk = state.rooms.filter(r=> roomAllowsType(r, task.subjectType));
+  if(typeOk.length===0){
+    return { type:"room", text:`No room is set up to host ${task.subjectType==="LAB"?"Laboratory":"Lecture"} subjects — set a room's Room Type to "${task.subjectType==="LAB"?"LAB":"LEC"}" or "Both" in the Rooms tab.` };
+  }
+  const bigEnough = typeOk.filter(r => !size || !r.capacity || r.capacity>=size);
   if(bigEnough.length===0){
-    const maxCap = state.rooms.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
+    const maxCap = typeOk.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
     return { type:"room", text:`No room seats ${size} — the largest room available seats ${maxCap||0}. Add a bigger room or lower the class size.` };
   }
-  if(!bigEnough.some(r=> roomHasStaticBlock(r, durationSlots, null))){
+  if(!bigEnough.some(r=> roomHasStaticBlock(r, durationSlots, null, days))){
     const hrs = (durationSlots*SLOT_LEN/60);
     return { type:"room", text:`No room seating ${size||"enough students"} has a continuous ${hrs}-hour open block anywhere in its weekly availability — check Edit Availability for those rooms.` };
   }
-  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, null))){
+  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, null, days))){
     return { type:"room", text:`Every room big enough for this session is already booked at all the times it's open long enough — add another suitably-sized room, or free up an existing booking.` };
   }
-  if(!bigEnough.some(r=> roomWithinCap(occ, r, durationSlots) && roomHasFreeBlock(r, durationSlots, occ, null))){
+  if(!bigEnough.some(r=> roomWithinCap(occ, r, durationSlots) && roomHasFreeBlock(r, durationSlots, occ, null, days))){
     return { type:"room", text:`Free time exists, but every big-enough room has already reached its shared-usage cap (Allowable Usage %) for the week — raise that room's cap, or add another room.` };
   }
-  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, usedDaysForSubject))){
+  if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, usedDaysForSubject, days))){
     return { type:"room", text:`A free room/time exists, but only on a day this subject already has another session — reduce Sessions/Week, or widen room availability to more days.` };
   }
-  const cohortOnlyOk = anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc);
-  const facultyOnlyOk = anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, task.facultyIds, facultyOcc);
+  const cohortOnlyOk = anyFreeIgnoringFaculty(bigEnough, durationSlots, occ, usedDaysForSubject, isCohort, cohortOcc, days);
+  const facultyOnlyOk = anyFreeIgnoringCohort(bigEnough, durationSlots, occ, usedDaysForSubject, task.facultyIds, facultyOcc, days);
   if(!cohortOnlyOk){
     return { type:"student", text:`Room and time are free, but this required course would overlap another required course for ${cohortGroupLabel(task.cohortGroup)} — no time avoids conflicting with that cohort's other courses. Try adjusting the other course's schedule, or add another room/faculty to free up options.` };
   }
@@ -1194,9 +1352,13 @@ function diagnosePairedTask(task, occ, isCohort, cohortOcc){
   const size = task.size, durationSlots = task.durationSlots;
   const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
   const pairLabels = pairKeys.map(pk=>DAY_PAIR_LABELS[pk]).join(", ");
-  const bigEnough = state.rooms.filter(r => !size || !r.capacity || r.capacity>=size);
+  const typeOk = state.rooms.filter(r=> roomAllowsType(r, task.subjectType));
+  if(typeOk.length===0){
+    return { type:"room", text:`No room is set up to host ${task.subjectType==="LAB"?"Laboratory":"Lecture"} subjects — set a room's Room Type to "${task.subjectType==="LAB"?"LAB":"LEC"}" or "Both" in the Rooms tab.` };
+  }
+  const bigEnough = typeOk.filter(r => !size || !r.capacity || r.capacity>=size);
   if(bigEnough.length===0){
-    const maxCap = state.rooms.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
+    const maxCap = typeOk.reduce((m,r)=> Math.max(m, r.capacity||0), 0);
     return { type:"room", text:`No room seats ${size} — the largest room available seats ${maxCap||0}. Add a bigger room or lower the class size.` };
   }
   function pairBlock(room, pk, withOcc, withCohort){
@@ -1235,7 +1397,7 @@ function diagnosePairedTask(task, occ, isCohort, cohortOcc){
 // own sessions have used up every day already, or (b) every remaining day/time overlaps
 // another required course for the same regular-student year level.
 function diagnoseScheduleOnlyTask(task, usedDaysForSubject, isCohort){
-  const daysLeft = DAYS.filter(d=> !usedDaysForSubject.has(d));
+  const daysLeft = candidateDaysFor(task).filter(d=> !usedDaysForSubject.has(d));
   if(daysLeft.length===0){
     return { type:"student", text:`This subject already has a session on every day of the week — reduce Sessions/Week.` };
   }
@@ -1280,9 +1442,11 @@ function validateAndSplitConflicts(result){
   // of them legitimately sharing the same day/time is not a room double-booking.
   const roomConflictIds = conflictSet(a=> (a.roomId && a.roomId!==TBA_ROOM_ID) ? a.roomId+"|"+a.day : null);
   const facultyConflictIds = conflictSet(a=> a.facultyId ? a.facultyId+"|"+a.day : null);
-  // Grouped by cohortGroup ("program|yearLabel"), not just "isCohort" — two cohort sessions
-  // only conflict if they belong to the SAME program+year (see buildCohortGroups).
-  const cohortConflictIds = conflictSet(a=> a.cohortGroup ? a.cohortGroup+"|"+a.day : null);
+  // Grouped by cohortGroup ("program|yearLabel") AND blockIndex, not just "isCohort" — two
+  // cohort sessions only conflict if they belong to the SAME program+year (see
+  // buildCohortGroups) AND the same block (different blocks are different student
+  // sub-groups and are free to overlap each other).
+  const cohortConflictIds = conflictSet(a=> a.cohortGroup ? a.cohortGroup+"|"+a.blockIndex+"|"+a.day : null);
 
   if(roomConflictIds.size===0 && facultyConflictIds.size===0 && cohortConflictIds.size===0) return result; // common case
 
@@ -1319,20 +1483,25 @@ function runTrial(tasksOrder){
   // given year level in the target semester must avoid every other required course for that
   // SAME year level, since one student takes them all at once. Different year levels get
   // their own independent grid, so (e.g.) a First Year course and a Second Year course never
-  // block each other — they're different students, taking classes in parallel.
+  // block each other — they're different students, taking classes in parallel. Also split by
+  // blockIndex: block 1 and block 2 represent different sub-groups of students within the
+  // same cohort (e.g. two parallel sections), so they must NOT be forced to dodge each
+  // other's courses — each block gets its own fully independent grid.
   const cohortOccByGroup = {};
-  function groupOccFor(group){
+  function groupOccFor(group, blockIndex){
     if(!group) return null;
-    if(!cohortOccByGroup[group]){
-      cohortOccByGroup[group] = {};
-      DAYS.forEach(d=> cohortOccByGroup[group][d] = new Array(NUM_SLOTS).fill(false));
+    const key = group + "::b" + blockIndex;
+    if(!cohortOccByGroup[key]){
+      cohortOccByGroup[key] = {};
+      DAYS.forEach(d=> cohortOccByGroup[key][d] = new Array(NUM_SLOTS).fill(false));
     }
-    return cohortOccByGroup[group];
+    return cohortOccByGroup[key];
   }
   const usedDays = {}; // subjectId -> Set(day)
   const assignments = [];
   const unscheduled = [];
   let lateLabCount = 0; // Laboratory sessions that spilled past LAB_PREFERRED_END_MIN
+  let fridayCount = 0; // sessions placed on Friday — discouraged for energy savings (constraint #4)
 
   // Total occupied slots per room so far this trial — used to bias placement toward
   // rooms already in use (maximize room utilization / minimize half-empty rooms).
@@ -1341,7 +1510,7 @@ function runTrial(tasksOrder){
   tasksOrder.forEach(task=>{
     if(task.type === "paired"){
       if(task.externalAssignment){
-        const groupOcc = groupOccFor(task.cohortGroup);
+        const groupOcc = groupOccFor(task.cohortGroup, task.blockIndex);
         const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
         let allCandidates = [];
         pairKeys.forEach(pk=>{
@@ -1360,6 +1529,7 @@ function runTrial(tasksOrder){
         });
         const topN = Math.min(3, allCandidates.length);
         const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+        if(pick.pairKey==="FSa") fridayCount++; // constraint #4: Fri/Sat pairing includes a Friday
         if(groupOcc){
           for(let k=0;k<task.durationSlots;k++){
             groupOcc[pick.day1][pick.start+k] = true;
@@ -1375,17 +1545,17 @@ function runTrial(tasksOrder){
             roomId: TBA_ROOM_ID, roomName: "TBA",
             day, startSlot: pick.start, durationSlots: task.durationSlots,
             startMin: SLOT_TIMES[pick.start], endMin: SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN,
-            paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup, external:true
+            paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup, blockIndex: task.blockIndex, external:true
           });
         });
         return;
       }
-      const groupOcc = groupOccFor(task.cohortGroup);
+      const groupOcc = groupOccFor(task.cohortGroup, task.blockIndex);
       const pairKeys = task.dayPairPref === "AUTO" ? DAY_PAIR_ORDER : [task.dayPairPref];
       let allCandidates = [];
       state.rooms.forEach(room=>{
         pairKeys.forEach(pk=>{
-          allCandidates = allCandidates.concat(findPairedCandidates(room, pk, task.durationSlots, occ, task.size, task.facultyIds, facultyOcc, task.isCohort, groupOcc));
+          allCandidates = allCandidates.concat(findPairedCandidates(room, pk, task.durationSlots, occ, task.size, task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType));
         });
       });
 
@@ -1412,6 +1582,7 @@ function runTrial(tasksOrder){
       });
       const topN = Math.min(3, allCandidates.length);
       const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+      if(pick.pairKey==="FSa") fridayCount++; // constraint #4: Fri/Sat pairing includes a Friday
 
       for(let k=0;k<task.durationSlots;k++){
         occ[pick.roomId][pick.day1][pick.start+k] = true;
@@ -1436,33 +1607,37 @@ function runTrial(tasksOrder){
           roomId: pick.roomId, roomName: room.name,
           day, startSlot: pick.start, durationSlots: task.durationSlots,
           startMin: SLOT_TIMES[pick.start], endMin: SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN,
-          paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup
+          paired:true, pairLabel, isCohort: task.isCohort, cohortGroup: task.cohortGroup, blockIndex: task.blockIndex
         });
       });
       return;
     }
 
-    if(!usedDays[task.subjectId]) usedDays[task.subjectId] = new Set();
+    if(!usedDays[task.instanceKey]) usedDays[task.instanceKey] = new Set();
 
     if(task.externalAssignment){
-      const groupOcc = groupOccFor(task.cohortGroup);
+      const groupOcc = groupOccFor(task.cohortGroup, task.blockIndex);
       let allCandidates = [];
-      DAYS.forEach(day=>{
-        allCandidates = allCandidates.concat(findScheduleOnlyCandidates(day, task.durationSlots, usedDays[task.subjectId], task.isCohort, groupOcc));
+      candidateDaysFor(task).forEach(day=>{
+        allCandidates = allCandidates.concat(findScheduleOnlyCandidates(day, task.durationSlots, usedDays[task.instanceKey], task.isCohort, groupOcc));
       });
       if(allCandidates.length===0){
-        const reason = diagnoseScheduleOnlyTask(task, usedDays[task.subjectId], task.isCohort);
+        const reason = diagnoseScheduleOnlyTask(task, usedDays[task.instanceKey], task.isCohort);
         unscheduled.push({
           subjectName: task.subjectName, sessionIndex: task.sessionIndex, labSection: task.labSection,
           conflictType: reason.type, conflictReason: reason.text
         });
         return;
       }
-      const pick = allCandidates[Math.floor(Math.random()*allCandidates.length)];
+      // Friday is discouraged (energy savings, constraint #4) — soft preference only.
+      allCandidates.sort((a,b)=> (a.day==="Fri"?1:0)-(b.day==="Fri"?1:0) || (Math.random()-0.5));
+      const extTopN = Math.min(3, allCandidates.length);
+      const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*extTopN)];
+      if(pick.day==="Fri") fridayCount++;
       if(groupOcc){
         for(let k=0;k<task.durationSlots;k++) groupOcc[pick.day][pick.start+k] = true;
       }
-      usedDays[task.subjectId].add(pick.day);
+      usedDays[task.instanceKey].add(pick.day);
       const endMin = SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN;
       assignments.push({
         id: genId("asg"),
@@ -1471,31 +1646,32 @@ function runTrial(tasksOrder){
         facultyId: null, facultyName: "TBD",
         roomId: TBA_ROOM_ID, roomName: "TBA",
         day: pick.day, startSlot: pick.start, durationSlots: task.durationSlots,
-        startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup, external:true
+        startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup, blockIndex: task.blockIndex, external:true
       });
       return;
     }
 
-    const groupOcc = groupOccFor(task.cohortGroup);
+    const groupOcc = groupOccFor(task.cohortGroup, task.blockIndex);
     let allCandidates = [];
     state.rooms.forEach(room=>{
-      DAYS.forEach(day=>{
-        const cands = findCandidates(room, day, task.durationSlots, occ, task.size, usedDays[task.subjectId], task.facultyIds, facultyOcc, task.isCohort, groupOcc);
+      candidateDaysFor(task).forEach(day=>{
+        const cands = findCandidates(room, day, task.durationSlots, occ, task.size, usedDays[task.instanceKey], task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType);
         allCandidates = allCandidates.concat(cands);
       });
     });
 
     if(allCandidates.length===0){
-      const reason = diagnoseSingleTask(task, occ, usedDays[task.subjectId], task.isCohort, groupOcc, facultyOcc);
+      const reason = diagnoseSingleTask(task, occ, usedDays[task.instanceKey], task.isCohort, groupOcc, facultyOcc);
       unscheduled.push({
         subjectName: task.subjectName, sessionIndex: task.sessionIndex, labSection: task.labSection,
         conflictType: reason.type, conflictReason: reason.text
       });
       return;
     }
-    // Laboratory subjects: prefer a candidate that stays within 7:30AM-5:00PM as much as
-    // possible, but this is a soft preference only — a later slot is still used if it's
-    // the only option (never filtered out, just sorted after the on-time ones).
+    // Laboratory subjects: prefer a candidate that stays within 7:30AM-6:00PM as much as
+    // possible (constraint #2); Friday is discouraged for energy savings (constraint #4).
+    // Both are soft preferences only — a worse-but-only slot is still used, just sorted
+    // after better ones.
     const isLab = task.subjectType === "LAB";
     const loadCache = {};
     allCandidates.sort((a,b)=>{
@@ -1504,6 +1680,8 @@ function runTrial(tasksOrder){
         const bLate = (SLOT_TIMES[b.start]+task.durationSlots*SLOT_LEN) > LAB_PREFERRED_END_MIN ? 1 : 0;
         if(aLate !== bLate) return aLate - bLate;
       }
+      const aFri = a.day==="Fri" ? 1 : 0, bFri = b.day==="Fri" ? 1 : 0;
+      if(aFri !== bFri) return aFri - bFri;
       const aLoad = (loadCache[a.roomId] ??= roomLoad(a.roomId));
       const bLoad = (loadCache[b.roomId] ??= roomLoad(b.roomId));
       const aScore = a.adj*10 + aLoad, bScore = b.adj*10 + bLoad;
@@ -1513,13 +1691,14 @@ function runTrial(tasksOrder){
     });
     const topN = Math.min(3, allCandidates.length);
     const pick = Math.random() < 0.7 ? allCandidates[0] : allCandidates[Math.floor(Math.random()*topN)];
+    if(pick.day==="Fri") fridayCount++;
 
     for(let k=0;k<task.durationSlots;k++){
       occ[pick.roomId][pick.day][pick.start+k] = true;
       if(pick.facultyId) facultyOcc[pick.facultyId][pick.day][pick.start+k] = true;
       if(groupOcc) groupOcc[pick.day][pick.start+k] = true;
     }
-    usedDays[task.subjectId].add(pick.day);
+    usedDays[task.instanceKey].add(pick.day);
     const room = state.rooms.find(r=>r.id===pick.roomId);
     const faculty = pick.facultyId ? state.faculty.find(f=>f.id===pick.facultyId) : null;
     const endMin = SLOT_TIMES[pick.start]+task.durationSlots*SLOT_LEN;
@@ -1531,7 +1710,7 @@ function runTrial(tasksOrder){
       facultyId: pick.facultyId, facultyName: faculty ? faculty.name : null,
       roomId: pick.roomId, roomName: room.name,
       day: pick.day, startSlot: pick.start, durationSlots: task.durationSlots,
-      startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup
+      startMin: SLOT_TIMES[pick.start], endMin: endMin, isCohort: task.isCohort, cohortGroup: task.cohortGroup, blockIndex: task.blockIndex
     });
   });
 
@@ -1550,7 +1729,25 @@ function runTrial(tasksOrder){
     });
   });
 
-  return { assignments, unscheduled, scheduledCount: assignments.length, gapScore, activeRoomDayCount, lateLabCount };
+  // Constraint #3: does this faculty member have at least one of the two break windows free
+  // on every day? Constraint #4: how much idle time sits between their first and last class
+  // of each day (e.g. a 7:30AM class then nothing again until 6PM) — same "trapped idle
+  // slots" measure as the room gapScore above, just applied per faculty member per day.
+  let facultyNoBreakCount = 0;
+  let facultyGapScore = 0;
+  state.faculty.forEach(f=>{
+    const occByDay = facultyOcc[f.id];
+    const hasBreak = FACULTY_BREAK_WINDOWS.some(w=> DAYS.every(d=> w.slots.every(i=> !occByDay[d][i])));
+    if(!hasBreak) facultyNoBreakCount++;
+    DAYS.forEach(d=>{
+      const arr = occByDay[d];
+      let first=-1, last=-1, count=0;
+      arr.forEach((v,i)=>{ if(v){ if(first===-1) first=i; last=i; count++; } });
+      if(first!==-1) facultyGapScore += (last-first+1-count);
+    });
+  });
+
+  return { assignments, unscheduled, scheduledCount: assignments.length, gapScore, activeRoomDayCount, lateLabCount, fridayCount, facultyNoBreakCount, facultyGapScore };
 }
 
 /* ---------------------------------------------------------------------
@@ -1559,12 +1756,19 @@ function runTrial(tasksOrder){
 
 // Fitness: sessions scheduled dominates everything (an empty slot is always worse than
 // any packing/timing imperfection), then room utilization (tight packing + fewer
-// half-empty room-days), then keeping Laboratory sessions within 7:30AM-5:00PM.
+// half-empty room-days), then keeping Laboratory sessions within 7:30AM-6:00PM (constraint
+// #2), minimizing Friday sessions (energy savings, constraint #4), giving each faculty
+// member a free 10:30-12:00/12:00-1:30 break (constraint #3), and tightening each faculty
+// member's daily schedule to avoid huge gaps like a 7:30AM class then nothing until 6PM
+// (constraint #4b).
 function scoreResult(result){
   return result.scheduledCount * 100000
        - result.gapScore * 3
        - result.activeRoomDayCount * 6
-       - result.lateLabCount * 25;
+       - result.lateLabCount * 25
+       - result.fridayCount * 10
+       - result.facultyNoBreakCount * 15
+       - result.facultyGapScore * 4;
 }
 
 function tournamentSelect(evaluated, k){
@@ -1625,7 +1829,8 @@ async function optimizeSchedule(onProgress){
   // Assignment roster is schedulable with zero rooms defined.
   const needsRoom = state.subjects.some(s=>!s.externalAssignment);
   if(needsRoom && state.rooms.length===0) return null;
-  const baseTasks = buildTasks();
+  const blocksUsed = Math.max(1, parseInt(state.blocks,10) || 1);
+  const baseTasks = buildTasks(blocksUsed);
   if(baseTasks.length===0) return null;
   baseTasks.forEach((t,i)=> t.__gaId = i);
   const totalTasks = baseTasks.length;
@@ -1650,7 +1855,8 @@ async function optimizeSchedule(onProgress){
   const numFaculty = state.faculty.length;
   const numSubjects = state.subjects.length;
   const numCohortTasks = baseTasks.filter(t=>t.isCohort).length;
-  const numCohortGroups = new Set(baseTasks.filter(t=>t.isCohort).map(t=>t.cohortGroup)).size;
+  // Distinct (cohortGroup, block) pairs — each is its own independent occupancy grid now.
+  const numCohortGroups = new Set(baseTasks.filter(t=>t.isCohort).map(t=>t.cohortGroup+"::b"+t.blockIndex)).size;
   const complexity = totalTasks * (1 + Math.log2(numRooms + 1)) + numFaculty*3 + numSubjects + numCohortTasks*1.5 + numCohortGroups*4;
   const popSize = clamp(Math.round(complexity*1.5), 20, 150);
   const maxGenerations = clamp(Math.round(complexity*2.2), 25, 300);
@@ -1689,6 +1895,9 @@ async function optimizeSchedule(onProgress){
       gapScore: best.result.gapScore,
       activeRoomDayCount: best.result.activeRoomDayCount,
       lateLabCount: best.result.lateLabCount,
+      fridayCount: best.result.fridayCount,
+      facultyNoBreakCount: best.result.facultyNoBreakCount,
+      facultyGapScore: best.result.facultyGapScore,
       cohortGroups: numCohortGroups,
       studentConflicts
     });
@@ -1726,6 +1935,7 @@ async function optimizeSchedule(onProgress){
   }
   best.result.generationsRun = genCount;
   best.result.populationSize = popSize;
+  best.result.blocksUsed = blocksUsed;
   report(genCount, true);
   return best.result;
 }
@@ -1852,10 +2062,22 @@ function renderScheduleTab(){
   const cohortSelect = document.getElementById("sched-cohort-select");
   if(cohortSelect){
     // Only cohorts that actually have at least one scheduled (plotted) session — a cohort
-    // whose every course conflicted has nothing to show on a grid anyway.
-    const cohortGroups = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=>a.cohortGroup))).sort();
-    cohortSelect.innerHTML = cohortGroups.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(cohortGroupLabel(g))}</option>`).join("");
-    if(!scheduleCohortGroup || !cohortGroups.includes(scheduleCohortGroup)) scheduleCohortGroup = cohortGroups[0] || null;
+    // whose every course conflicted has nothing to show on a grid anyway. With 2+ blocks,
+    // each (cohortGroup, block) pair gets its own entry — see cohortCompositeKey().
+    const blocksUsed = sched.blocksUsed || 1;
+    const seen = new Set();
+    const entries = [];
+    sched.assignments.filter(a=>a.cohortGroup).forEach(a=>{
+      const key = cohortCompositeKey(a.cohortGroup, a.blockIndex);
+      if(seen.has(key)) return;
+      seen.add(key);
+      const label = blocksUsed>=2 ? `${cohortGroupLabel(a.cohortGroup)} (Block ${(a.blockIndex||0)+1})` : cohortGroupLabel(a.cohortGroup);
+      entries.push({ key, label });
+    });
+    entries.sort((a,b)=> a.label.localeCompare(b.label));
+    const cohortKeys = entries.map(e=>e.key);
+    cohortSelect.innerHTML = entries.map(e=>`<option value="${escapeHtml(e.key)}">${escapeHtml(e.label)}</option>`).join("");
+    if(!scheduleCohortGroup || !cohortKeys.includes(scheduleCohortGroup)) scheduleCohortGroup = cohortKeys[0] || null;
     if(scheduleCohortGroup) cohortSelect.value = scheduleCohortGroup;
     cohortSelect.addEventListener("change", (e)=>{ scheduleCohortGroup = e.target.value; renderScheduleView(); });
   }
@@ -1884,13 +2106,13 @@ function renderScheduleView(){
   }
 
   if(scheduleView === "cohort"){
-    const cohortGroups = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=>a.cohortGroup)));
-    if(cohortGroups.length===0){
+    const cohortKeys = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=> cohortCompositeKey(a.cohortGroup, a.blockIndex))));
+    if(cohortKeys.length===0){
       panel.innerHTML = '<div class="empty">No regular-student cohorts in this schedule — set a Target Semester (above) and link subjects to prospectus courses, then optimize again.</div>';
       return;
     }
-    const group = cohortGroups.includes(scheduleCohortGroup) ? scheduleCohortGroup : cohortGroups[0];
-    panel.innerHTML = renderCohortGrid(group, sched);
+    const key = cohortKeys.includes(scheduleCohortGroup) ? scheduleCohortGroup : cohortKeys[0];
+    panel.innerHTML = renderCohortGrid(key, sched);
     return;
   }
 
@@ -1974,10 +2196,16 @@ function renderFacultyGrid(faculty, sched){
   return renderScheduleGrid(title, subtitle, assignments, null, { showRoom:true, showCohort:true });
 }
 
-function renderCohortGrid(cohortGroup, sched){
-  const assignments = sched.assignments.filter(a=>a.cohortGroup===cohortGroup);
-  const title = `🎓 ${escapeHtml(cohortGroupLabel(cohortGroup))} — Regular Students`;
-  const subtitle = `<p class="sub">${assignments.length} required session${assignments.length===1?"":"s"} this week — every course a regular student in this cohort takes.</p>`;
+// `cohortKey` is the composite (cohortGroup, block) key from cohortCompositeKey() — with 2+
+// blocks each block gets its own table so a subject never appears twice for two different
+// student sub-groups (see the comment on cohortCompositeKey).
+function renderCohortGrid(cohortKey, sched){
+  const { group, blockIndex } = parseCohortComposite(cohortKey);
+  const assignments = sched.assignments.filter(a=> a.cohortGroup===group && (a.blockIndex||0)===blockIndex);
+  const blocksUsed = sched.blocksUsed || 1;
+  const blockSuffix = blocksUsed>=2 ? ` (Block ${blockIndex+1})` : "";
+  const title = `🎓 ${escapeHtml(cohortGroupLabel(group))}${blockSuffix} — Regular Students`;
+  const subtitle = `<p class="sub">${assignments.length} required session${assignments.length===1?"":"s"} this week — every course a regular student in this ${blocksUsed>=2?"block":"cohort"} takes.</p>`;
   return renderScheduleGrid(title, subtitle, assignments, null, { showRoom:true, showFaculty:true });
 }
 
@@ -2040,9 +2268,12 @@ function exportCsv(){
     scopeLabel = faculty.name;
   } else if(scheduleView === "cohort"){
     if(!scheduleCohortGroup){ alert("No regular-student cohort is selected or available — set a Target Semester and optimize again."); return; }
-    assignments = assignments.filter(a=>a.cohortGroup===scheduleCohortGroup);
-    filename = `schedule-cohort-${slugify(cohortGroupLabel(scheduleCohortGroup))}.csv`;
-    scopeLabel = cohortGroupLabel(scheduleCohortGroup);
+    const { group, blockIndex } = parseCohortComposite(scheduleCohortGroup);
+    const blocksUsed = state.schedule ? (state.schedule.blocksUsed || 1) : 1;
+    const blockSuffix = blocksUsed>=2 ? ` (Block ${blockIndex+1})` : "";
+    assignments = assignments.filter(a=> a.cohortGroup===group && (a.blockIndex||0)===blockIndex);
+    filename = `schedule-cohort-${slugify(cohortGroupLabel(group)+blockSuffix)}.csv`;
+    scopeLabel = cohortGroupLabel(group) + blockSuffix;
   }
 
   if(assignments.length===0){ alert(`No scheduled sessions to export for ${scopeLabel || "this view"} yet.`); return; }
@@ -2074,6 +2305,18 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
   });
 });
 
+// Guide tab flowchart: click (or Enter/Space) a step card to jump straight to that tab.
+function jumpToTabFromGuide(tab){
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if(btn) btn.click();
+}
+document.querySelectorAll(".flow-step[data-jump]").forEach(el=>{
+  el.addEventListener("click", ()=> jumpToTabFromGuide(el.dataset.jump));
+  el.addEventListener("keydown", (e)=>{
+    if(e.key==="Enter" || e.key===" "){ e.preventDefault(); jumpToTabFromGuide(el.dataset.jump); }
+  });
+});
+
 document.getElementById("add-room-btn").addEventListener("click", ()=>{
   const nameInput = document.getElementById("room-name");
   const capInput = document.getElementById("room-capacity");
@@ -2095,8 +2338,10 @@ document.getElementById("add-room-btn").addEventListener("click", ()=>{
     usagePct = parseInt(usagePctInput.value,10);
     if(isNaN(usagePct) || usagePct<1 || usagePct>100){ alert("Allowable Usage % must be a whole number from 1 to 100."); usagePctInput.focus(); return; }
   }
-  addRoom(name, cap, openMin, closeMin, usagePct);
+  const roomType = document.getElementById("room-type").value;
+  addRoom(name, cap, openMin, closeMin, usagePct, roomType);
   nameInput.value=""; capInput.value=""; usagePctInput.value="100";
+  document.getElementById("room-type").value = "BOTH";
   nameInput.focus();
 });
 
@@ -2150,7 +2395,7 @@ labSplitToggleEl.addEventListener("change", refreshSplitUI);
 document.getElementById("add-subject-btn").addEventListener("click", ()=>{
   const nameInput = document.getElementById("subj-name");
   const name = nameInput.value.trim();
-  if(!name){ alert("Please enter a subject name."); nameInput.focus(); return; }
+  if(!name){ alert("Please enter a subject code."); nameInput.focus(); return; }
 
   const type = typeSelectEl.value === "LAB" ? "LAB" : "LEC";
   const isSplit = type === "LEC" && durationSelectEl.value === SPLIT_ELIGIBLE_SLOTS && splitToggleEl.checked;
@@ -2204,9 +2449,10 @@ document.getElementById("add-faculty-btn").addEventListener("click", ()=>{
   nameInput.focus();
 });
 
-document.getElementById("faculty-list").addEventListener("click",(e)=>{
-  const delBtn = e.target.closest('[data-action="delete-faculty"]');
-  if(delBtn) deleteFaculty(delBtn.dataset.id);
+document.getElementById("faculty-list-select").addEventListener("change", renderFacultyDetail);
+document.getElementById("delete-faculty-btn").addEventListener("click", ()=>{
+  const sel = document.getElementById("faculty-list-select");
+  if(sel.value) deleteFaculty(sel.value);
 });
 
 /* --- Prospectus tab wiring --- */
@@ -2373,6 +2619,14 @@ document.getElementById("target-term-select").addEventListener("change",(e)=>{
   }
 });
 
+document.getElementById("global-blocks-input").addEventListener("change",(e)=>{
+  let v = parseInt(e.target.value,10);
+  if(isNaN(v) || v<1) v = 1;
+  e.target.value = v;
+  state.blocks = v;
+  saveState();
+});
+
 /* ---------------------------------------------------------------------
    GA PROGRESS / CONVERGENCE MODAL
 --------------------------------------------------------------------- */
@@ -2387,7 +2641,7 @@ function openGaModal(){
   document.getElementById("ga-progress-fill").style.width = "0%";
   document.getElementById("ga-progress-pct").textContent = "0%";
   document.getElementById("ga-progress-hint").textContent = "Starting…";
-  ["ga-stat-gen","ga-stat-pop","ga-stat-scheduled","ga-stat-gap","ga-stat-latelab","ga-stat-cohorts"].forEach(id=>{
+  ["ga-stat-gen","ga-stat-pop","ga-stat-scheduled","ga-stat-gap","ga-stat-latelab","ga-stat-friday","ga-stat-nobreak","ga-stat-facgap","ga-stat-cohorts"].forEach(id=>{
     document.getElementById(id).textContent = "–";
   });
   document.getElementById("ga-stat-cohorts-tile").style.display = "none";
@@ -2454,6 +2708,9 @@ function updateGaModal(progress){
   document.getElementById("ga-stat-scheduled").textContent = `${progress.scheduledCount} / ${progress.totalSessions}`;
   document.getElementById("ga-stat-gap").textContent = progress.gapScore;
   document.getElementById("ga-stat-latelab").textContent = progress.lateLabCount;
+  document.getElementById("ga-stat-friday").textContent = progress.fridayCount;
+  document.getElementById("ga-stat-nobreak").textContent = progress.facultyNoBreakCount;
+  document.getElementById("ga-stat-facgap").textContent = progress.facultyGapScore;
   // Only shown when a Target Semester is actually loading regular-student cohorts — each
   // group is one independent program+year-level (e.g. a 4-year program's term has 4 of
   // these), all being satisfied at once by this same run.
@@ -2500,6 +2757,13 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
   // scenario the optimizer can run with zero rooms defined.
   const needsRoom = state.subjects.some(s=>!s.externalAssignment);
   if(needsRoom && state.rooms.length===0){ alert("Add at least one room first (or mark every subject as External Assignment if none of them need one)."); return; }
+  // Sync Number of Blocks in case it was typed but never blurred/changed-out-of.
+  const blocksInput = document.getElementById("global-blocks-input");
+  let blocksVal = parseInt(blocksInput.value,10);
+  if(isNaN(blocksVal) || blocksVal<1) blocksVal = 1;
+  blocksInput.value = blocksVal;
+  state.blocks = blocksVal;
+  saveState();
   const btn = document.getElementById("optimize-btn");
   const status = document.getElementById("optimize-status");
   btn.disabled = true; btn.textContent = "Optimizing…";
@@ -2854,17 +3118,18 @@ function parseAvailabilityString(str){
 /* --- Rooms --- */
 function exportRoomsCsv(){
   if(state.rooms.length===0){ alert("No rooms to export yet."); return; }
-  const rows = [["Name","Capacity","Availability","UsageLimitPercent"]];
-  state.rooms.forEach(r=> rows.push([r.name, r.capacity||"", serializeAvailability(r), r.usageLimitPercent==null?100:r.usageLimitPercent]));
+  const rows = [["Name","Capacity","Availability","UsageLimitPercent","RoomType"]];
+  state.rooms.forEach(r=> rows.push([r.name, r.capacity||"", serializeAvailability(r), r.usageLimitPercent==null?100:r.usageLimitPercent, r.roomType==="LEC"||r.roomType==="LAB" ? r.roomType : "BOTH"]));
   downloadCsv("rooms.csv", rows);
   trackEvent("exportRoomsCsv", { numRooms: state.rooms.length });
 }
 function downloadRoomsTemplate(){
   downloadCsv("rooms-template.csv", [
-    ["Name","Capacity","Availability","UsageLimitPercent"],
-    ["Room 101","40","","100"],
-    ["Room 102","25","Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM","100"],
-    ["Shared Auditorium","120","","50"]
+    ["Name","Capacity","Availability","UsageLimitPercent","RoomType"],
+    ["Room 101","40","","100","BOTH"],
+    ["Room 102","25","Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM","100","LEC"],
+    ["Chemistry Lab","30","","100","LAB"],
+    ["Shared Auditorium","120","","50","BOTH"]
   ]);
 }
 function importRoomsFromRows(dataRows){
@@ -2874,14 +3139,18 @@ function importRoomsFromRows(dataRows){
     if(!name) return;
     const capRaw = parseInt(cols[1],10);
     // UsageLimitPercent is a 4th, optional column — a 3-column file (from before this field
-    // existed) is still fully valid and every room in it just defaults to 100%.
+    // existed) is still fully valid and every room in it just defaults to 100%. RoomType is a
+    // 5th, also-optional column — missing/unrecognized values default to BOTH.
     const usagePctRaw = parseInt(cols[3],10);
     const usageLimitPercent = (!isNaN(usagePctRaw) && usagePctRaw>=1 && usagePctRaw<=100) ? usagePctRaw : 100;
+    const roomTypeRaw = (cols[4]||"").trim().toUpperCase();
+    const roomType = (roomTypeRaw==="LEC"||roomTypeRaw==="LAB") ? roomTypeRaw : "BOTH";
     state.rooms.push({
       id: genId("room"), name,
       capacity: !isNaN(capRaw) && capRaw>0 ? capRaw : null,
       availability: parseAvailabilityString(cols[2]) || makeAvailability(),
-      usageLimitPercent
+      usageLimitPercent,
+      roomType
     });
     added++;
   });
@@ -2894,7 +3163,7 @@ function importRoomsFromRows(dataRows){
 /* --- Subjects --- */
 function exportSubjectsCsv(){
   if(state.subjects.length===0){ alert("No subjects to export yet."); return; }
-  const rows = [["Name","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"]];
+  const rows = [["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"]];
   state.subjects.forEach(s=> rows.push([
     s.name, s.type, s.durationSlots*SLOT_LEN, s.sessionsPerWeek, s.size||"",
     s.isSplitPair ? "TRUE" : "FALSE", s.dayPairPref||"", s.isCapacitySplit ? "TRUE" : "FALSE",
@@ -2905,11 +3174,11 @@ function exportSubjectsCsv(){
 }
 function downloadSubjectsTemplate(){
   downloadCsv("subjects-template.csv", [
-    ["Name","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"],
-    ["Calculus 101","LEC","60","3","35","FALSE","","",""],
-    ["Chemistry Lab","LAB","180","2","35","FALSE","","TRUE",""],
-    ["Biology 3-Unit","LEC","180","2","30","TRUE","AUTO","FALSE",""],
-    ["PE 1 (handled by another college)","LEC","120","1","","FALSE","","","TRUE"]
+    ["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"],
+    ["MATH101","LEC","60","3","35","FALSE","","",""],
+    ["CHEM011L","LAB","180","2","35","FALSE","","TRUE",""],
+    ["BIO101","LEC","180","2","30","TRUE","AUTO","FALSE",""],
+    ["PE1","LEC","120","1","","FALSE","","","TRUE"]
   ]);
 }
 function importSubjectsFromRows(dataRows){
@@ -2959,41 +3228,52 @@ function exportFacultyCsv(){
   if(state.faculty.length===0){ alert("No faculty to export yet."); return; }
   const subjectById = {};
   state.subjects.forEach(s=> subjectById[s.id] = s);
-  const rows = [["Name","SubjectsHandled"]];
+  const rows = [["Name","SubjectCodes"]];
   state.faculty.forEach(f=> rows.push([
-    f.name, f.subjectIds.map(id=> subjectById[id] ? subjectById[id].name : null).filter(Boolean).join("; ")
+    f.name, f.subjectIds.map(id=> subjectById[id] ? subjectCodeLabel(subjectById[id]) : null).filter(Boolean).join("; ")
   ]));
   downloadCsv("faculty.csv", rows);
   trackEvent("exportFacultyCsv");
 }
 function downloadFacultyTemplate(){
   downloadCsv("faculty-template.csv", [
-    ["Name","SubjectsHandled"],
-    ["Engr. Dela Cruz","Calculus 101; Chemistry Lab"],
-    ["Engr. Santos","Chemistry Lab"]
+    ["Name","SubjectCodes"],
+    ["Engr. Dela Cruz","MATH101; CHEM011L"],
+    ["Engr. Santos","CHEM011L"]
   ]);
 }
 function importFacultyFromRows(dataRows){
-  let added = 0, unmatchedRefs = 0, externalSkipped = 0;
+  let added = 0, merged = 0, unmatchedRefs = 0, externalSkipped = 0;
   dataRows.forEach(cols=>{
     const name = (cols[0]||"").trim();
     if(!name) return;
     const subjectIds = [];
     (cols[1]||"").split(";").map(s=>s.trim()).filter(Boolean).forEach(subjName=>{
-      const match = state.subjects.find(s=> s.name.toLowerCase()===subjName.toLowerCase());
+      const match = state.subjects.find(s=> subjectCodeLabel(s).toLowerCase()===subjName.toLowerCase());
       if(!match){ unmatchedRefs++; return; }
       // External-Assignment subjects have no faculty of ours to assign (faculty is TBD) —
       // the optimizer would never actually use this link, so don't silently create it.
       if(match.externalAssignment){ externalSkipped++; return; }
       subjectIds.push(match.id);
     });
-    state.faculty.push({ id: genId("fac"), name, subjectIds });
-    added++;
+    // A row whose name matches an existing (or already-imported-this-run) faculty member
+    // merges its subjects into that record instead of creating a duplicate — same rule as
+    // adding one by hand.
+    const existing = findFacultyByName(name);
+    if(existing){
+      const set = new Set(existing.subjectIds);
+      subjectIds.forEach(id=> set.add(id));
+      existing.subjectIds = Array.from(set);
+      merged++;
+    } else {
+      state.faculty.push({ id: genId("fac"), name, subjectIds });
+      added++;
+    }
   });
   saveState();
   renderFaculty();
-  trackEvent("importFacultyCsv", { extra:{ added, unmatchedRefs, externalSkipped } });
-  return { added, unmatchedRefs, externalSkipped };
+  trackEvent("importFacultyCsv", { extra:{ added, merged, unmatchedRefs, externalSkipped } });
+  return { added, merged, unmatchedRefs, externalSkipped };
 }
 
 document.getElementById("rooms-export-btn").addEventListener("click", exportRoomsCsv);
@@ -3022,7 +3302,7 @@ document.getElementById("faculty-import-btn").addEventListener("click", ()=> doc
 document.getElementById("faculty-import-file").addEventListener("change", (e)=>{
   const file = e.target.files[0];
   if(file) handleCsvImport(file, importFacultyFromRows, (r)=>
-    `Imported ${r.added} faculty member(s).${r.unmatchedRefs ? ` ${r.unmatchedRefs} subject reference(s) not found (import Subjects first, and make sure names match exactly).` : ""}${r.externalSkipped ? ` ${r.externalSkipped} reference(s) skipped — those subjects are marked External Assignment and don't need faculty.` : ""}`
+    `Imported ${r.added} faculty member(s).${r.merged ? ` ${r.merged} row(s) matched an existing faculty member and had their subjects merged in instead of duplicating.` : ""}${r.unmatchedRefs ? ` ${r.unmatchedRefs} subject reference(s) not found (import Subjects first, and make sure names match exactly).` : ""}${r.externalSkipped ? ` ${r.externalSkipped} reference(s) skipped — those subjects are marked External Assignment and don't need faculty.` : ""}`
   );
   e.target.value = "";
 });
@@ -3033,6 +3313,7 @@ document.getElementById("faculty-import-file").addEventListener("change", (e)=>{
 populateDurationSelect();
 populateRoomHoursSelects(document.getElementById("room-open-from"), document.getElementById("room-open-until"));
 refreshSplitUI();
+document.getElementById("global-blocks-input").value = state.blocks;
 renderRooms();
 renderSubjects();
 renderFaculty();

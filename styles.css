@@ -167,12 +167,22 @@
   #prospectus-review-table input{width:100%;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;padding:5px 6px;font-size:12.5px;}
   #prospectus-review-table td{padding:5px 6px;}
 
-  .guide-steps{list-style:none;margin:0;padding:0;counter-reset:guide-step;display:flex;flex-direction:column;gap:16px;}
-  .guide-steps>li{position:relative;padding-left:40px;counter-increment:guide-step;}
-  .guide-steps>li::before{content:counter(guide-step);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;}
-  .guide-steps>li>b{font-size:14.5px;}
-  .guide-steps>li>p{margin:4px 0 0;color:var(--text-dim);font-size:13px;line-height:1.5;}
-  .guide-steps>li>ul{margin:6px 0 0;padding-left:18px;color:var(--text-dim);font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:4px;}
+  /* Guide tab flowchart: numbered step cards connected by arrow glyphs, click-to-jump to that tab */
+  .flow-wrap{display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:680px;margin:0 auto;}
+  .flow-step{display:flex;gap:14px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:14px 18px;cursor:pointer;transition:border-color .12s,box-shadow .12s,transform .12s;}
+  .flow-step:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(0,0,0,.06);transform:translateY(-1px);}
+  .flow-step:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .flow-num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;}
+  .flow-icon{flex:none;font-size:20px;line-height:30px;}
+  .flow-body{min-width:0;}
+  .flow-title{font-weight:700;font-size:14.5px;color:var(--text);}
+  .flow-sub{font-size:10.5px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px;}
+  .flow-body>p{margin:0;color:var(--text-dim);font-size:13px;line-height:1.5;}
+  .flow-arrow{align-self:center;color:var(--accent);font-size:20px;line-height:1;padding:4px 0;opacity:.7;}
+  @media print{
+    .flow-step{cursor:default;break-inside:avoid;}
+    .flow-step:hover{transform:none;box-shadow:none;}
+  }
   .faq-item{border:1px solid var(--border);border-radius:12px;padding:2px 16px;margin-bottom:10px;background:var(--bg);}
   .faq-item:last-child{margin-bottom:0;}
   .faq-item summary{cursor:pointer;font-weight:600;font-size:13.5px;padding:12px 0;list-style:none;}
