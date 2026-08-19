@@ -154,6 +154,59 @@ function loadState(){
 loadState();
 
 /* ---------------------------------------------------------------------
+   USAGE TRACKING
+   Fire-and-forget POSTs to /api/track for the "App Usage Summary" tab and for
+   app-functionality-testing monitoring. This ONLY works when the app is served by
+   server.py (see project root) — the plain `python3 -m http.server` has no /api/track
+   endpoint, so these calls just fail silently there and the app behaves identically
+   either way; nothing about tracking is ever allowed to break or slow down a real action.
+--------------------------------------------------------------------- */
+// One id per page load (sessionStorage, not localStorage) — a reasonable stand-in for
+// "one visit"; reloading the tab counts as a new visit, matching how the summary tab
+// reports "visitor count" as unique sessions rather than unique people.
+const TRACK_SESSION_ID = (function(){
+  try{
+    let id = sessionStorage.getItem("rms_session_id");
+    if(!id){ id = genId("sess"); sessionStorage.setItem("rms_session_id", id); }
+    return id;
+  }catch(e){ return genId("sess"); } // sessionStorage unavailable (private mode, etc.)
+})();
+// The round-trip latency of the PREVIOUS tracking call — a request can't know its own
+// latency until its response arrives, so each event reports the latency measured for the
+// one before it. The very first event of a session has no prior sample (sent as "").
+let lastTrackLatencyMs = null;
+function trackEvent(functionName, opts){
+  opts = opts || {};
+  const body = {
+    session_id: TRACK_SESSION_ID,
+    event_type: opts.eventType || "action",
+    function_name: functionName,
+    generations: opts.generations!=null ? opts.generations : "",
+    population_size: opts.populationSize!=null ? opts.populationSize : "",
+    num_rooms: opts.numRooms!=null ? opts.numRooms : "",
+    latency_ms: lastTrackLatencyMs==null ? "" : Math.round(lastTrackLatencyMs*10)/10,
+    error_message: opts.errorMessage ? String(opts.errorMessage).slice(0,1000) : "",
+    details: opts.extra || null
+  };
+  const now = (window.performance && performance.now) ? ()=>performance.now() : ()=>Date.now();
+  const t0 = now();
+  fetch("/api/track", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(body),
+    keepalive: true // let the request finish even if this fires right as the user navigates away
+  }).then(()=>{ lastTrackLatencyMs = now() - t0; })
+    .catch(()=>{ /* no tracking server running — never surfaced to the user */ });
+}
+// Never let a bug in the app go unrecorded, and never let recording it throw either.
+window.addEventListener("error", (e)=>{
+  trackEvent(e.filename ? e.filename.split("/").pop() : "window", { eventType:"error", errorMessage: e.message || String(e.error) });
+});
+window.addEventListener("unhandledrejection", (e)=>{
+  trackEvent("promise", { eventType:"error", errorMessage: e.reason && e.reason.message ? e.reason.message : String(e.reason) });
+});
+
+/* ---------------------------------------------------------------------
    ROOMS
 --------------------------------------------------------------------- */
 // Fills an "open from" / "open until" select pair with every valid half-hour boundary
@@ -170,26 +223,46 @@ function populateRoomHoursSelects(fromSel, untilSel, defaultFrom, defaultUntil){
   ).join("");
 }
 
-function addRoom(name, capacity, openMin, closeMin){
+function addRoom(name, capacity, openMin, closeMin, usageLimitPercent){
   state.rooms.push({
     id: genId("room"),
     name: name,
     capacity: capacity || null,
-    availability: makeAvailability(openMin, closeMin)
+    availability: makeAvailability(openMin, closeMin),
+    // Shared-room cap: the optimizer will never book more than this % of the room's total
+    // weekly open slots, leaving the rest free for whoever else the room is shared with.
+    // Defaults to 100 (fully ours) for both new rooms and any imported/legacy data.
+    usageLimitPercent: (usageLimitPercent==null || usageLimitPercent==="") ? 100 : usageLimitPercent
   });
   saveState();
   renderRooms();
+  trackEvent("addRoom", { numRooms: state.rooms.length });
 }
 function deleteRoom(id){
   if(!confirm("Delete this room? This cannot be undone.")) return;
   state.rooms = state.rooms.filter(r=>r.id!==id);
   saveState();
   renderRooms();
+  trackEvent("deleteRoom", { numRooms: state.rooms.length });
 }
 function availableSlotCount(room){
   let c=0;
   DAYS.forEach(d=> room.availability[d].forEach(v=>{ if(v) c++; }));
   return c;
+}
+// The most half-hour slots this app's optimizer is allowed to book into a (possibly shared)
+// room this week — its total open slots, capped down to usageLimitPercent% of them.
+function maxAllowedSlots(room){
+  const pct = (room.usageLimitPercent==null) ? 100 : room.usageLimitPercent;
+  return Math.floor(availableSlotCount(room) * clamp(pct, 0, 100) / 100);
+}
+// Total half-hour slots already booked into a room so far in this trial — shared by the GA
+// decoder (to bias placement toward rooms already in use) and by candidate-finding (to
+// enforce maxAllowedSlots for shared rooms).
+function computeRoomLoad(occ, roomId){
+  let load = 0;
+  DAYS.forEach(d=> occ[roomId][d].forEach(v=>{ if(v) load++; }));
+  return load;
 }
 
 function renderRooms(){
@@ -202,11 +275,13 @@ function renderRooms(){
   list.innerHTML = state.rooms.map(r=>{
     const total = DAYS.length*NUM_SLOTS;
     const avail = availableSlotCount(r);
+    const usagePct = r.usageLimitPercent==null ? 100 : r.usageLimitPercent;
+    const sharedTag = usagePct<100 ? ` &nbsp;•&nbsp; <span class="tag-external" title="This app's optimizer will only book up to ${usagePct}% of this room's open slots — the rest stays free for other shared use.">🔀 Shared: ${usagePct}% (max ${maxAllowedSlots(r)} slots)</span>` : "";
     return `<div class="card" data-id="${r.id}">
       <div class="icon">🏫</div>
       <div class="info">
         <div class="name">${escapeHtml(r.name)}</div>
-        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week</div>
+        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week${sharedTag}</div>
       </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" data-action="edit-avail" data-id="${r.id}">Edit Availability</button>
@@ -267,6 +342,7 @@ function addSubject(name, durationSlots, sessionsPerWeek, size, isSplitPair, day
   state.subjects.push(buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment));
   saveState();
   renderSubjects();
+  trackEvent("addSubject", { extra:{ type, externalAssignment: !!externalAssignment } });
 }
 function toggleSubjectExternal(id){
   const s = state.subjects.find(x=>x.id===id);
@@ -274,6 +350,7 @@ function toggleSubjectExternal(id){
   s.externalAssignment = !s.externalAssignment;
   saveState();
   renderSubjects();
+  trackEvent("toggleSubjectExternal", { extra:{ externalAssignment: s.externalAssignment } });
 }
 function deleteSubject(id){
   if(!confirm("Delete this subject? This cannot be undone.")) return;
@@ -283,6 +360,7 @@ function deleteSubject(id){
   saveState();
   renderSubjects();
   renderFaculty();
+  trackEvent("deleteSubject");
 }
 
 function renderSubjects(){
@@ -350,12 +428,14 @@ function addFaculty(name, subjectIds){
   });
   saveState();
   renderFaculty();
+  trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length } });
 }
 function deleteFaculty(id){
   if(!confirm("Delete this faculty member? This cannot be undone.")) return;
   state.faculty = state.faculty.filter(f=>f.id!==id);
   saveState();
   renderFaculty();
+  trackEvent("deleteFaculty");
 }
 
 function renderFaculty(){
@@ -595,6 +675,7 @@ function deleteProspectusCourse(id){
   saveState();
   renderProspectus();
   renderSubjects();
+  trackEvent("deleteProspectusCourse");
 }
 function deleteProspectusProgram(program){
   if(!confirm(`Delete every course uploaded under "${program}"? Any subject linked to one will be unlinked. This cannot be undone.`)) return;
@@ -604,6 +685,7 @@ function deleteProspectusProgram(program){
   saveState();
   renderProspectus();
   renderSubjects();
+  trackEvent("deleteProspectusProgram");
 }
 function clearProspectus(){
   if(state.prospectus.length===0) return;
@@ -614,6 +696,7 @@ function clearProspectus(){
   saveState();
   renderProspectus();
   renderSubjects();
+  trackEvent("clearProspectus");
 }
 
 /* --- CSV import/export (reuses the generic CSV helpers defined later in this file — see
@@ -674,6 +757,7 @@ function importProspectusFromRows(dataRows, defaultProgram){
   });
   saveState();
   renderProspectus();
+  trackEvent("importProspectusCsv", { extra:{ added, skipped, duplicates } });
   return { added, skipped, duplicates };
 }
 
@@ -897,6 +981,9 @@ function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
 function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc){
   if(usedDaysForSubject.has(day)) return [];
   if(size && room.capacity && room.capacity < size) return [];
+  // Shared-room cap: this session's slots would push the room's weekly booked total past the
+  // usageLimitPercent budget it's allowed to claim — skip the room entirely for this task.
+  if(computeRoomLoad(occ, room.id) + durationSlots > maxAllowedSlots(room)) return [];
   const avail = room.availability[day];
   const occArr = occ[room.id][day];
   const cohortArr = isCohort ? cohortOcc[day] : null;
@@ -961,6 +1048,9 @@ function findScheduleOnlyPairedCandidates(pairKey, durationSlots, isCohort, coho
 // AND a qualified faculty member free on both days at that same time.
 function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc){
   if(size && room.capacity && room.capacity < size) return [];
+  // Same shared-room budget check as findCandidates, but a paired session books durationSlots
+  // on BOTH days of the pair, so it costs durationSlots*2 against the room's weekly cap.
+  if(computeRoomLoad(occ, room.id) + durationSlots*2 > maxAllowedSlots(room)) return [];
   const [d1,d2] = DAY_PAIRS[pairKey];
   const av1 = room.availability[d1], av2 = room.availability[d2];
   const occ1 = occ[room.id][d1], occ2 = occ[room.id][d2];
@@ -1021,6 +1111,12 @@ function roomHasFreeBlock(room, durationSlots, occ, excludeDays){
     return false;
   });
 }
+// Would booking costSlots more into this (possibly shared) room stay within its
+// usageLimitPercent budget? Used to tell "genuinely no free time" apart from "free time
+// exists, but this room has already given up its share to other bookings this week".
+function roomWithinCap(occ, room, costSlots){
+  return computeRoomLoad(occ, room.id) + costSlots <= maxAllowedSlots(room);
+}
 function facultyNamesFor(facultyIds){
   return facultyIds.map(id=>{ const f=state.faculty.find(x=>x.id===id); return f?f.name:null; }).filter(Boolean);
 }
@@ -1077,6 +1173,9 @@ function diagnoseSingleTask(task, occ, usedDaysForSubject, isCohort, cohortOcc, 
   if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, null))){
     return { type:"room", text:`Every room big enough for this session is already booked at all the times it's open long enough — add another suitably-sized room, or free up an existing booking.` };
   }
+  if(!bigEnough.some(r=> roomWithinCap(occ, r, durationSlots) && roomHasFreeBlock(r, durationSlots, occ, null))){
+    return { type:"room", text:`Free time exists, but every big-enough room has already reached its shared-usage cap (Allowable Usage %) for the week — raise that room's cap, or add another room.` };
+  }
   if(!bigEnough.some(r=> roomHasFreeBlock(r, durationSlots, occ, usedDaysForSubject))){
     return { type:"room", text:`A free room/time exists, but only on a day this subject already has another session — reduce Sessions/Week, or widen room availability to more days.` };
   }
@@ -1120,6 +1219,9 @@ function diagnosePairedTask(task, occ, isCohort, cohortOcc){
   }
   if(!bigEnough.some(r=> pairKeys.some(pk=> pairBlock(r, pk, true, false)))){
     return { type:"room", text:`Every room big enough is already booked at all matching same-time slots across its preferred day pair(s) (${pairLabels}) — add another room or free up a booking.` };
+  }
+  if(!bigEnough.some(r=> roomWithinCap(occ, r, durationSlots*2) && pairKeys.some(pk=> pairBlock(r, pk, true, false)))){
+    return { type:"room", text:`A matching free time exists, but every big-enough room has already reached its shared-usage cap (Allowable Usage %) for the week — raise that room's cap, or add another room.` };
   }
   if(isCohort && !bigEnough.some(r=> pairKeys.some(pk=> pairBlock(r, pk, true, true)))){
     return { type:"student", text:`Room and time are free, but this required course would overlap another required course for ${cohortGroupLabel(task.cohortGroup)} on its preferred day pair (${pairLabels}) — no matching time avoids conflicting with that cohort's other courses.` };
@@ -1234,11 +1336,7 @@ function runTrial(tasksOrder){
 
   // Total occupied slots per room so far this trial — used to bias placement toward
   // rooms already in use (maximize room utilization / minimize half-empty rooms).
-  function roomLoad(roomId){
-    let load = 0;
-    DAYS.forEach(d=> occ[roomId][d].forEach(v=>{ if(v) load++; }));
-    return load;
-  }
+  function roomLoad(roomId){ return computeRoomLoad(occ, roomId); }
 
   tasksOrder.forEach(task=>{
     if(task.type === "paired"){
@@ -1716,9 +1814,16 @@ function renderScheduleTab(){
   document.getElementById("view-mode-select").addEventListener("change", (e)=>{
     scheduleView = e.target.value;
     renderScheduleTab();
+    trackEvent("switchScheduleView", { extra:{ view: scheduleView } });
   });
-  document.getElementById("print-btn").addEventListener("click", ()=> window.print());
-  document.getElementById("csv-btn").addEventListener("click", exportCsv);
+  document.getElementById("print-btn").addEventListener("click", ()=>{
+    window.print();
+    trackEvent("printSchedule", { extra:{ view: scheduleView } });
+  });
+  document.getElementById("csv-btn").addEventListener("click", ()=>{
+    exportCsv();
+    trackEvent("exportScheduleCsv", { extra:{ view: scheduleView } });
+  });
 
   const roomSelect = document.getElementById("sched-room-select");
   if(roomSelect){
@@ -1964,6 +2069,8 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
     document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-"+btn.dataset.tab).classList.add("active");
+    trackEvent("switchTab", { eventType:"navigation", extra:{ tab: btn.dataset.tab } });
+    if(btn.dataset.tab === "usage") renderUsageSummary();
   });
 });
 
@@ -1972,6 +2079,7 @@ document.getElementById("add-room-btn").addEventListener("click", ()=>{
   const capInput = document.getElementById("room-capacity");
   const openFromSel = document.getElementById("room-open-from");
   const openUntilSel = document.getElementById("room-open-until");
+  const usagePctInput = document.getElementById("room-usage-percent");
   const name = nameInput.value.trim();
   if(!name){ alert("Please enter a room name."); nameInput.focus(); return; }
   let cap = null;
@@ -1982,8 +2090,13 @@ document.getElementById("add-room-btn").addEventListener("click", ()=>{
   const openMin = parseInt(openFromSel.value, 10);
   const closeMin = parseInt(openUntilSel.value, 10);
   if(closeMin <= openMin){ alert('"Open Until" must be after "Open From".'); return; }
-  addRoom(name, cap, openMin, closeMin);
-  nameInput.value=""; capInput.value="";
+  let usagePct = 100;
+  if(usagePctInput.value.trim()){
+    usagePct = parseInt(usagePctInput.value,10);
+    if(isNaN(usagePct) || usagePct<1 || usagePct>100){ alert("Allowable Usage % must be a whole number from 1 to 100."); usagePctInput.focus(); return; }
+  }
+  addRoom(name, cap, openMin, closeMin, usagePct);
+  nameInput.value=""; capInput.value=""; usagePctInput.value="100";
   nameInput.focus();
 });
 
@@ -2152,9 +2265,12 @@ document.getElementById("prospectus-pdf-file").addEventListener("change", async 
       return;
     }
     openProspectusReviewModal(parsed, program);
+    trackEvent("uploadProspectusPdf", { extra:{ parsedCourseCount: parsed.length } });
   }catch(err){
     statusEl.textContent = "";
-    alert("Couldn't read that PDF: " + (err && err.message ? err.message : err));
+    const msg = err && err.message ? err.message : String(err);
+    alert("Couldn't read that PDF: " + msg);
+    trackEvent("uploadProspectusPdf", { eventType:"error", errorMessage: msg });
   }
 });
 
@@ -2197,6 +2313,7 @@ document.getElementById("prospectus-review-import").addEventListener("click", ()
   renderProspectus();
   closeProspectusReviewModal();
   alert(`Imported ${added} course(s).${duplicates ? ` Skipped ${duplicates} duplicate(s) already in your prospectus.` : ""}${skipped ? ` Skipped ${skipped} row(s) still missing required fields.` : ""}`);
+  trackEvent("importProspectusPdfReview", { extra:{ added, skipped, duplicates } });
 });
 
 function updateTargetTermHint(){
@@ -2252,6 +2369,7 @@ document.getElementById("target-term-select").addEventListener("change",(e)=>{
       // prospectus has data, but none of it has a Term that reads exactly "<newTerm>".
       alert(`No prospectus courses found with Term "${newTerm}". Check the Prospectus tab — your uploaded Term values must read exactly "First Semester", "Second Semester", or "Summer Term" (re-download the CSV template if you're using an older file, since it now also needs a Program column).`);
     }
+    trackEvent("changeTargetSemester", { extra:{ term: newTerm, loaded: result.added, cleared: removedCount } });
   }
 });
 
@@ -2397,6 +2515,7 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
   if(!result){
     closeGaModal();
     status.textContent = "Nothing to schedule.";
+    trackEvent("optimize", { eventType:"optimize_complete", numRooms: state.rooms.length, extra:{ result:"nothing_to_schedule" } });
     return;
   }
   result = validateAndSplitConflicts(result);
@@ -2408,6 +2527,13 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
     ? `✅ All ${total} sessions scheduled. ${genInfo}`
     : `⚠ ${result.assignments.length}/${total} sessions scheduled. ${genInfo}`;
   renderScheduleTab();
+  trackEvent("optimize", {
+    eventType: "optimize_complete",
+    generations: result.generationsRun,
+    populationSize: result.populationSize,
+    numRooms: state.rooms.length,
+    extra: { scheduledCount: result.assignments.length, unscheduledCount: result.unscheduled.length, totalSessions: total, numSubjects: state.subjects.length, numFaculty: state.faculty.length }
+  });
 });
 
 document.getElementById("clear-schedule-btn").addEventListener("click", ()=>{
@@ -2417,6 +2543,208 @@ document.getElementById("clear-schedule-btn").addEventListener("click", ()=>{
   saveState();
   document.getElementById("optimize-status").textContent = "";
   renderScheduleTab();
+});
+
+/* ---------------------------------------------------------------------
+   APP USAGE SUMMARY (reads back what server.py has logged to usage_log.csv)
+--------------------------------------------------------------------- */
+// Generic hand-rolled SVG bar chart — same house style as the GA convergence charts
+// (no external chart library), used for any single-series categorical breakdown.
+function svgBarChart(labels, values, opts){
+  opts = opts || {};
+  const w = opts.width || 640, h = opts.height || 220;
+  const padTop = 22, padBottom = 34, padSide = 10;
+  const n = values.length;
+  if(n===0) return "";
+  const max = Math.max(1, ...values);
+  const gap = 8;
+  const barW = Math.max(6, (w - padSide*2) / n - gap);
+  let svg = "";
+  values.forEach((v,i)=>{
+    const x = padSide + i*((w - padSide*2)/n);
+    const barH = ((h - padTop - padBottom) * v) / max;
+    const y = h - padBottom - barH;
+    const label = String(labels[i]==null ? "" : labels[i]);
+    const shortLabel = label.length>14 ? label.slice(0,13)+"…" : label;
+    svg += `<rect class="bar-rect" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,barH).toFixed(1)}" rx="3"><title>${escapeHtml(label)}: ${v}</title></rect>`;
+    svg += `<text class="bar-value" x="${(x+barW/2).toFixed(1)}" y="${(y-5).toFixed(1)}" text-anchor="middle">${v}</text>`;
+    svg += `<text class="bar-label" x="${(x+barW/2).toFixed(1)}" y="${h-padBottom+13}" text-anchor="middle">${escapeHtml(shortLabel)}<title>${escapeHtml(label)}</title></text>`;
+  });
+  return `<svg class="usage-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${svg}</svg>`;
+}
+// Line chart for a value sampled over time (reuses the same point-plotting math as the GA
+// convergence charts, just standalone here since the summary tab renders independently of
+// an optimize run).
+function svgLineChart(values, opts){
+  opts = opts || {};
+  const w = opts.width || 640, h = opts.height || 160, pad = 12;
+  if(values.length===0) return "";
+  const pts = svgPolylinePoints(values, w, h, pad);
+  const areaPts = `${pad},${h-pad} ${pts} ${w-pad},${h-pad}`;
+  return `<svg class="usage-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline class="fillarea" points="${areaPts}"></polyline>
+    <polyline class="line" points="${pts}"></polyline>
+  </svg>`;
+}
+function usageStatTile(label, value){
+  return `<div class="summary-item"><div class="label">${escapeHtml(label)}</div><b>${value}</b></div>`;
+}
+
+async function renderUsageSummary(){
+  const container = document.getElementById("usage-summary-results");
+  if(!container) return;
+  container.innerHTML = '<div class="panel"><div class="empty">Loading usage data…</div></div>';
+
+  let events;
+  try{
+    const res = await fetch("/api/usage-data", { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    events = Array.isArray(data.events) ? data.events : [];
+  }catch(e){
+    container.innerHTML = `<div class="panel"><div class="usage-empty-note">
+      <b>No usage-tracking server detected.</b> This tab reads live data from a <code>/api/usage-data</code>
+      endpoint that only exists when the app is served by <code>server.py</code>, not the plain
+      <code>python3 -m http.server</code>. From the project folder, run:
+      <br><br><code>python3 server.py</code>
+      <br><br>then reload this page and come back to this tab. Everything else in the app works
+      exactly the same either way — tracking is optional and never required for scheduling.
+    </div></div>`;
+    return;
+  }
+
+  if(events.length===0){
+    container.innerHTML = `<div class="panel"><div class="empty">No usage recorded yet — activity will appear here as the app is used (yours included). Try adding a room or running Optimize, then click Refresh above.</div></div>`;
+    return;
+  }
+
+  // --- Aggregate everything client-side from the raw event list ---
+  const uniqueSessions = new Set(events.map(e=>e.session_id).filter(Boolean));
+  const uniqueIps = new Set(events.map(e=>e.ip).filter(Boolean));
+  const functionCounts = {};
+  events.forEach(e=>{ if(e.function_name){ functionCounts[e.function_name] = (functionCounts[e.function_name]||0)+1; } });
+  const funcEntries = Object.entries(functionCounts).sort((a,b)=>b[1]-a[1]);
+
+  const latencySamples = events.map(e=>parseFloat(e.latency_ms)).filter(v=>!isNaN(v) && v>=0);
+  const avgLatency = latencySamples.length ? (latencySamples.reduce((a,b)=>a+b,0)/latencySamples.length) : null;
+  const maxLatency = latencySamples.length ? Math.max(...latencySamples) : null;
+  const minLatency = latencySamples.length ? Math.min(...latencySamples) : null;
+
+  const optimizeRuns = events.filter(e=>e.event_type==="optimize_complete" && e.function_name==="optimize")
+    .sort((a,b)=> (a.timestamp||"").localeCompare(b.timestamp||""));
+  const errors = events.filter(e=>e.event_type==="error")
+    .sort((a,b)=> (b.timestamp||"").localeCompare(a.timestamp||""));
+
+  const recent = events.slice().sort((a,b)=> (b.timestamp||"").localeCompare(a.timestamp||"")).slice(0,50);
+
+  let html = "";
+
+  // Shown only when printed (the on-screen title lives in the .no-print toolbar panel above,
+  // which is hidden on the printed page) — so a printed copy is self-explanatory on its own.
+  html += `<div class="print-only">
+    <h1 style="margin:0 0 4px;font-size:19px;">App Usage Summary — Room Scheduling Optimization System</h1>
+    <p style="margin:0 0 14px;color:#555;font-size:12px;">Printed ${escapeHtml(new Date().toLocaleString())} &nbsp;•&nbsp; ${events.length} event(s) recorded &nbsp;•&nbsp; ${uniqueSessions.size} visitor session(s)</p>
+  </div>`;
+
+  // --- Overview stat tiles ---
+  html += `<div class="summary-bar">
+    ${usageStatTile("Visitor Count (sessions)", uniqueSessions.size)}
+    ${usageStatTile("Unique IP Addresses", uniqueIps.size)}
+    ${usageStatTile("Total Events Recorded", events.length)}
+    ${usageStatTile("Distinct Functions Used", funcEntries.length)}
+    ${usageStatTile("Optimizer Runs", optimizeRuns.length)}
+    ${usageStatTile("Errors Reported", errors.length)}
+  </div>`;
+
+  // --- Function usage bar chart ---
+  html += `<div class="panel">
+    <h2>Function Usage</h2>
+    <div class="usage-chart-wrap">${svgBarChart(funcEntries.slice(0,12).map(x=>x[0]), funcEntries.slice(0,12).map(x=>x[1]))}</div>
+    <p class="usage-chart-caption">How many times each app action has been used (top ${Math.min(12,funcEntries.length)} of ${funcEntries.length}), across every visitor recorded — taller bars mean that feature gets used more, which is a good signal for where to focus testing or polish.</p>
+  </div>`;
+
+  // --- Latency line chart ---
+  if(latencySamples.length>=2){
+    html += `<div class="panel">
+      <h2>Network Latency</h2>
+      <div class="summary-bar">
+        ${usageStatTile("Average", avgLatency.toFixed(0)+" ms")}
+        ${usageStatTile("Fastest", minLatency.toFixed(0)+" ms")}
+        ${usageStatTile("Slowest", maxLatency.toFixed(0)+" ms")}
+      </div>
+      <div class="usage-chart-wrap">${svgLineChart(latencySamples)}</div>
+      <p class="usage-chart-caption">Round-trip time (in milliseconds) of each recorded tracking request, in the order they happened — a rough proxy for how responsive the connection to the server has been. Spikes suggest network congestion or server load rather than anything wrong with the scheduling logic itself, which runs entirely in the browser.</p>
+    </div>`;
+  }
+
+  // --- Optimizer runs: population size chart + detail table ---
+  if(optimizeRuns.length>0){
+    const popValues = optimizeRuns.map(e=> parseInt(e.population_size,10) || 0);
+    const runLabels = optimizeRuns.map((e,i)=> "Run "+(i+1));
+    html += `<div class="panel">
+      <h2>Optimizer Runs — Generations &amp; Population</h2>
+      <div class="usage-chart-wrap">${svgBarChart(runLabels.slice(-12), popValues.slice(-12))}</div>
+      <p class="usage-chart-caption">Population size the genetic algorithm auto-scaled to for each of the last ${Math.min(12,optimizeRuns.length)} optimize run(s) (of ${optimizeRuns.length} total) — larger populations mean a harder scheduling problem (more rooms/subjects/constraints) was being solved.</p>
+      <div style="overflow-x:auto;margin-top:12px;">
+        <table class="list-table">
+          <thead><tr><th>When</th><th>Generations</th><th>Population</th><th>Rooms</th><th>Scheduled</th></tr></thead>
+          <tbody>${optimizeRuns.slice().reverse().slice(0,20).map(e=>{
+            const extra = (function(){ try{ return JSON.parse(e.details||"{}"); }catch(err){ return {}; } })();
+            return `<tr>
+              <td>${escapeHtml(e.timestamp||"")}</td>
+              <td>${escapeHtml(e.generations||"")}</td>
+              <td>${escapeHtml(e.population_size||"")}</td>
+              <td>${escapeHtml(e.num_rooms||"")}</td>
+              <td>${extra.scheduledCount!=null ? `${extra.scheduledCount}/${extra.totalSessions}` : ""}</td>
+            </tr>`;
+          }).join("")}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  // --- Errors table ---
+  if(errors.length>0){
+    html += `<div class="panel conflict-panel">
+      <h2>⚠️ Error Reports (${errors.length})</h2>
+      <p class="usage-chart-caption">Uncaught JavaScript errors and promise rejections captured automatically from every visitor's browser — useful for spotting bugs that don't show up in normal testing.</p>
+      <div style="overflow-x:auto;">
+        <table class="list-table">
+          <thead><tr><th>When</th><th>Where</th><th>Message</th></tr></thead>
+          <tbody>${errors.slice(0,30).map(e=>`<tr>
+            <td>${escapeHtml(e.timestamp||"")}</td>
+            <td>${escapeHtml(e.function_name||"")}</td>
+            <td>${escapeHtml(e.error_message||"")}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  // --- Recent activity table ---
+  html += `<div class="panel">
+    <h2>Recent Activity</h2>
+    <p class="usage-chart-caption">The most recent ${recent.length} recorded events across all visitors, newest first — a raw activity feed for spot-checking what's actually happening in the app.</p>
+    <div style="overflow-x:auto;">
+      <table class="list-table">
+        <thead><tr><th>When</th><th>IP</th><th>Function</th><th>Type</th></tr></thead>
+        <tbody>${recent.map(e=>`<tr>
+          <td>${escapeHtml(e.timestamp||"")}</td>
+          <td>${escapeHtml(e.ip||"")}</td>
+          <td>${escapeHtml(e.function_name||"")}</td>
+          <td>${escapeHtml(e.event_type||"")}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+    </div>
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+document.getElementById("usage-refresh-btn").addEventListener("click", renderUsageSummary);
+document.getElementById("usage-print-btn").addEventListener("click", ()=>{
+  window.print();
+  trackEvent("printUsageSummary");
 });
 
 /* ---------------------------------------------------------------------
@@ -2526,15 +2854,17 @@ function parseAvailabilityString(str){
 /* --- Rooms --- */
 function exportRoomsCsv(){
   if(state.rooms.length===0){ alert("No rooms to export yet."); return; }
-  const rows = [["Name","Capacity","Availability"]];
-  state.rooms.forEach(r=> rows.push([r.name, r.capacity||"", serializeAvailability(r)]));
+  const rows = [["Name","Capacity","Availability","UsageLimitPercent"]];
+  state.rooms.forEach(r=> rows.push([r.name, r.capacity||"", serializeAvailability(r), r.usageLimitPercent==null?100:r.usageLimitPercent]));
   downloadCsv("rooms.csv", rows);
+  trackEvent("exportRoomsCsv", { numRooms: state.rooms.length });
 }
 function downloadRoomsTemplate(){
   downloadCsv("rooms-template.csv", [
-    ["Name","Capacity","Availability"],
-    ["Room 101","40",""],
-    ["Room 102","25","Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM"]
+    ["Name","Capacity","Availability","UsageLimitPercent"],
+    ["Room 101","40","","100"],
+    ["Room 102","25","Mon 7:30 AM-5:00 PM; Wed 7:30 AM-5:00 PM","100"],
+    ["Shared Auditorium","120","","50"]
   ]);
 }
 function importRoomsFromRows(dataRows){
@@ -2543,15 +2873,21 @@ function importRoomsFromRows(dataRows){
     const name = (cols[0]||"").trim();
     if(!name) return;
     const capRaw = parseInt(cols[1],10);
+    // UsageLimitPercent is a 4th, optional column — a 3-column file (from before this field
+    // existed) is still fully valid and every room in it just defaults to 100%.
+    const usagePctRaw = parseInt(cols[3],10);
+    const usageLimitPercent = (!isNaN(usagePctRaw) && usagePctRaw>=1 && usagePctRaw<=100) ? usagePctRaw : 100;
     state.rooms.push({
       id: genId("room"), name,
       capacity: !isNaN(capRaw) && capRaw>0 ? capRaw : null,
-      availability: parseAvailabilityString(cols[2]) || makeAvailability()
+      availability: parseAvailabilityString(cols[2]) || makeAvailability(),
+      usageLimitPercent
     });
     added++;
   });
   saveState();
   renderRooms();
+  trackEvent("importRoomsCsv", { numRooms: state.rooms.length, extra:{ added } });
   return added;
 }
 
@@ -2565,6 +2901,7 @@ function exportSubjectsCsv(){
     s.externalAssignment ? "TRUE" : "FALSE"
   ]));
   downloadCsv("subjects.csv", rows);
+  trackEvent("exportSubjectsCsv");
 }
 function downloadSubjectsTemplate(){
   downloadCsv("subjects-template.csv", [
@@ -2613,6 +2950,7 @@ function importSubjectsFromRows(dataRows){
   });
   saveState();
   renderSubjects();
+  trackEvent("importSubjectsCsv", { extra:{ added, skipped } });
   return { added, skipped };
 }
 
@@ -2626,6 +2964,7 @@ function exportFacultyCsv(){
     f.name, f.subjectIds.map(id=> subjectById[id] ? subjectById[id].name : null).filter(Boolean).join("; ")
   ]));
   downloadCsv("faculty.csv", rows);
+  trackEvent("exportFacultyCsv");
 }
 function downloadFacultyTemplate(){
   downloadCsv("faculty-template.csv", [
@@ -2653,6 +2992,7 @@ function importFacultyFromRows(dataRows){
   });
   saveState();
   renderFaculty();
+  trackEvent("importFacultyCsv", { extra:{ added, unmatchedRefs, externalSkipped } });
   return { added, unmatchedRefs, externalSkipped };
 }
 
@@ -2698,5 +3038,6 @@ renderSubjects();
 renderFaculty();
 renderProspectus();
 renderScheduleTab();
+trackEvent("appLoad", { eventType:"page_view", numRooms: state.rooms.length, extra:{ numSubjects: state.subjects.length, numFaculty: state.faculty.length } });
 
 })();

@@ -4,3 +4,11 @@
 # OS/editor cruft
 .DS_Store
 *.swp
+
+# Usage-tracking log written by server.py at runtime — contains visitor IP addresses,
+# never commit it.
+usage_log.csv
+
+# Python bytecode cache
+__pycache__/
+*.pyc

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Room Scheduling Optimization System</title>
-<link rel="stylesheet" href="styles.css?v=4">
+<link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
 
@@ -26,6 +26,7 @@
   <button class="tab-btn" data-tab="prospectus">Prospectus <span class="tab-badge" id="badge-prospectus">0</span></button>
   <button class="tab-btn" data-tab="schedule">Optimize Schedule</button>
   <button class="tab-btn" data-tab="guide">📘 Guide</button>
+  <button class="tab-btn" data-tab="usage">📊 App Usage Summary</button>
 </nav>
 
 <main>
@@ -34,7 +35,7 @@
   <section id="tab-rooms" class="tab-content active">
     <div class="panel no-print">
       <h2>Add a Room</h2>
-      <p class="sub">Default availability is every day, 7:30 AM – 9:00 PM. Narrow the open/close times below to override the default for this room (rooms can't open earlier than 7:30 AM or stay open later than 9:00 PM) — or leave them as-is and fine-tune specific days/times afterward with "Edit Availability".</p>
+      <p class="sub">Default availability is every day, 7:30 AM – 9:00 PM. Narrow the open/close times below to override the default for this room (rooms can't open earlier than 7:30 AM or stay open later than 9:00 PM) — or leave them as-is and fine-tune specific days/times afterward with "Edit Availability". For rooms shared with other departments, set <b>Allowable Usage %</b> below 100% to cap how much of the room's open time this app's optimizer is allowed to claim.</p>
       <div class="form-row" id="room-form">
         <div class="field">
           <label>Room Name</label>
@@ -51,6 +52,10 @@
         <div class="field">
           <label>Open Until</label>
           <select id="room-open-until" style="min-width:120px;"></select>
+        </div>
+        <div class="field">
+          <label>Allowable Usage % (shared rooms)</label>
+          <input type="number" id="room-usage-percent" placeholder="100" min="1" max="100" value="100" style="width:110px;">
         </div>
         <button class="btn btn-primary" id="add-room-btn">+ Add Room</button>
       </div>
@@ -235,7 +240,7 @@
       <ol class="guide-steps">
         <li>
           <b>Add your Rooms</b> (Rooms tab)
-          <p>Give each room a name and, optionally, a seating capacity. Rooms default to open every day, 7:30 AM – 9:00 PM — the outer bound the app never lets a room go beyond. Narrow the hours at creation ("Open From" / "Open Until"), or fine-tune specific days/times afterward with <b>Edit Availability</b> on the room card.</p>
+          <p>Give each room a name and, optionally, a seating capacity. Rooms default to open every day, 7:30 AM – 9:00 PM — the outer bound the app never lets a room go beyond. Narrow the hours at creation ("Open From" / "Open Until"), or fine-tune specific days/times afterward with <b>Edit Availability</b> on the room card. For a room shared with other departments, set <b>Allowable Usage %</b> below 100% — the optimizer will then cap how many of that room's weekly slots it's allowed to book, leaving the rest free for whoever else uses it.</p>
         </li>
         <li>
           <b>(Optional) Upload a Program Prospectus</b> (Prospectus tab)
@@ -276,7 +281,7 @@
       <h2>❓ Frequently Asked Questions</h2>
       <details class="faq-item" open>
         <summary>Where is my data stored? Is anything sent to a server?</summary>
-        <div>Everything (rooms, subjects, faculty, prospectus, schedules) is saved only in your browser's local storage — nothing is uploaded anywhere. The one exception: the first time you use <b>Upload PDF</b>, a PDF-reading library is fetched from a public CDN so the app can read the file; the PDF itself is still processed entirely in your browser, not sent anywhere.</div>
+        <div>Everything (rooms, subjects, faculty, prospectus, schedules) is saved only in your browser's local storage — nothing about your actual scheduling data is uploaded anywhere. Two exceptions: (1) the first time you use <b>Upload PDF</b>, a PDF-reading library is fetched from a public CDN so the app can read the file, though the PDF itself is still processed entirely in your browser; and (2) if the app is being served by <code>server.py</code> (rather than a plain static server), basic usage activity — page visits, which features get used, your IP address — is logged server-side to <code>usage_log.csv</code> for app-functionality testing, and summarized in the App Usage Summary tab.</div>
       </details>
       <details class="faq-item">
         <summary>Why can't a room open before 7:30 AM or stay open past 9:00 PM?</summary>
@@ -307,15 +312,34 @@
         <div>Room availability can be edited anytime via "Edit Availability". Subjects and faculty don't have a full edit form yet — delete and re-add with the corrected values. The one exception is External Assignment, which has its own "Mark/Unmark External" toggle right on the subject card.</div>
       </details>
       <details class="faq-item">
+        <summary>The App Usage Summary tab says "No usage-tracking server detected" — why?</summary>
+        <div>That tab reads live data from <code>server.py</code>, a small local server included in the project that serves the app <b>and</b> logs basic usage activity to <code>usage_log.csv</code> (timestamps, IP addresses, which features get used, optimizer generations/population, network latency, and any app errors — for functionality testing, not for the scheduling itself). If you started the app with the plain <code>python3 -m http.server</code> instead, that endpoint doesn't exist. Run <code>python3 server.py</code> from the project folder instead, then reload the page — everything else in the app works identically either way.</div>
+      </details>
+      <details class="faq-item">
+        <summary>What's "Allowable Usage %" on a room, and when should I use it?</summary>
+        <div>It's for rooms shared with other departments/colleges that this app doesn't control the full schedule of. Set it below 100% (e.g. 50%) and the optimizer will never book more than that share of the room's total weekly open slots — the rest stays free for whoever else uses the room. It defaults to 100% (fully available to this app) for every room unless you change it.</div>
+      </details>
+      <details class="faq-item">
         <summary>Found a bug — how do I report it?</summary>
         <div>Visit the <a href="https://dee.msuiit.edu.ph" target="_blank" rel="noopener noreferrer">Department of Electrical Engineering (DEE)</a> website, linked in the footer of every page.</div>
       </details>
     </div>
   </section>
 
+  <!-- APP USAGE SUMMARY TAB -->
+  <section id="tab-usage" class="tab-content">
+    <div class="panel no-print">
+      <h2>📊 App Usage Summary</h2>
+      <p class="sub">Visitor activity, function usage, and optimizer/network monitoring recorded by <code>server.py</code> for app-functionality testing. This tab needs the app to be served by <code>server.py</code> (not the plain <code>python3 -m http.server</code>) — see the Guide tab or the project README.</p>
+      <button class="btn btn-sm btn-ghost" id="usage-refresh-btn">🔄 Refresh</button>
+      <button class="btn btn-sm btn-ghost" id="usage-print-btn">🖨 Print</button>
+    </div>
+    <div id="usage-summary-results"></div>
+  </section>
+
 </main>
 
-<footer>All data is saved locally in your browser (localStorage). Nothing is sent to a server. &nbsp;•&nbsp; Found a bug? Visit the <a href="https://dee.msuiit.edu.ph" target="_blank" rel="noopener noreferrer">Department of Electrical Engineering (DEE)</a> website to report it.</footer>
+<footer>Your rooms/subjects/faculty/schedule data is saved only in your browser (localStorage) — never sent anywhere. If this app is being served by <code>server.py</code>, basic usage activity (page visits, features used, your IP address) is separately logged server-side for app-functionality testing — see the App Usage Summary tab. &nbsp;•&nbsp; Found a bug? Visit the <a href="https://dee.msuiit.edu.ph" target="_blank" rel="noopener noreferrer">Department of Electrical Engineering (DEE)</a> website to report it.</footer>
 
 <!-- Availability Editor Modal -->
 <div class="modal-backdrop" id="avail-modal-backdrop">
@@ -401,6 +425,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
