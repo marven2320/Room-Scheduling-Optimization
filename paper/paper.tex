@@ -283,10 +283,10 @@ We extracted the optimizer's exact, unmodified production logic (task constructi
 \toprule
 Scenario & Rooms & Subjects & Faculty & Sessions \\
 \midrule
-Small  & 3  & 10 & 3  & \input{tab_sessions_small.tex} \\
-Medium & 5  & 25 & 6  & \input{tab_sessions_medium.tex} \\
-Large  & 8  & 40 & 10 & \input{tab_sessions_large.tex} \\
-XLarge & 10 & 55 & 14 & \input{tab_sessions_xlarge.tex} \\
+Small  & 3  & 10 & 3  & 14 \\
+Medium & 5  & 25 & 6  & 37 \\
+Large  & 8  & 40 & 10 & 61 \\
+XLarge & 10 & 55 & 14 & 78 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -299,30 +299,56 @@ Independently of the controlled benchmark, the deployed application logs anonymi
 \section{Results and Discussion}
 
 \subsection{Synthetic Benchmark Results}
-Table \ref{tab:results} summarizes the controlled benchmark. \input{tab_discussion_note.tex}
+Table \ref{tab:results} summarizes the controlled benchmark. Across all four scales, the deployed decoder placed the large majority of sessions in a single greedy pass already, since hard-constraint checking (H1--H9) is identical for the genetic algorithm and the baseline -- both use the same \texttt{runTrial} decoder. The genetic algorithm's contribution is therefore concentrated in the soft-objective terms.
 
 \begin{table*}[t]
 \caption{Genetic Algorithm vs. Greedy-Only Baseline, by Scenario (mean $\pm$ std over 10 trials)}
 \label{tab:results}
 \centering
 \small
-\input{tab_results.tex}
+\begin{tabular}{lcccccccc}
+\toprule
+Scenario & \multicolumn{2}{c}{Placement (\%)} & \multicolumn{2}{c}{Fitness} & Gens & Pop & Time (ms) & $\Delta$Fitness \\
+& GA & Greedy & GA & Greedy & (GA) & & (GA) & (GA$-$Greedy) \\
+\midrule
+Small & 83.2$\pm$19.5 & 83.2 & 1,209,972 & 1,209,885 & 23.4$\pm$9.4 & 83 & 3592$\pm$1180 & +86 \\
+Medium & 96.3$\pm$5.7 & 96.3 & 3,589,841 & 3,589,638 & 7.3$\pm$1.6 & 150 & 7604$\pm$323 & +203 \\
+Large & 99.5$\pm$0.8 & 99.5 & 5,899,644 & 5,899,345 & 3.9$\pm$0.5 & 150 & 10359$\pm$1109 & +299 \\
+XLarge & 98.8$\pm$2.8 & 98.8 & 8,239,457 & 8,239,183 & 2.7$\pm$0.5 & 150 & 14717$\pm$1796 & +274 \\
+\bottomrule
+\end{tabular}
 \end{table*}
 
-\input{results_narrative.tex}
+Table~\ref{tab:results} shows that, in every one of the 40 trials run (10 per scale across all four scales), the genetic algorithm placed \emph{exactly} the same number of sessions as the greedy-only baseline -- a perfect 0-session difference in every trial, not just an average tie. This is expected once the shared decoder is considered: both the GA's best individual and the baseline are decoded through the identical constraint-respecting greedy procedure (\texttt{runTrial}), and the heuristic (most-constrained-first) ordering used as the baseline is also seeded into the GA's initial population and protected by elitism -- so the GA can never place \emph{fewer} sessions than the baseline, and in this benchmark, evidently found no ordering that placed \emph{more}. What the genetic algorithm consistently achieves instead is a higher overall \emph{fitness} than the single-pass baseline in every trial across all four scales -- a mean improvement of 86 (Small), 203 (Medium), 299 (Large), and 274 (XLarge) -- driven entirely by the five soft-objective terms of Eq.~(\ref{eq:fitness}): tighter room-utilization packing (lower gapScore and active-room-day count), fewer Friday sessions, fewer late laboratory sessions, and more faculty members retaining a protected break window. This is a meaningful but modest result: it shows the evolutionary search reliably refines schedule \emph{quality} beyond the heuristic-seeded greedy pass, but on these synthetic instances it did not need to (and was not observed to) unlock additional \emph{feasibility} that the heuristic alone could not already reach -- a distinction the placement-dominant fitness function in Eq.~(\ref{eq:fitness}) was explicitly designed to preserve. Problem instances where the heuristic ordering performs poorly at placement (e.g. tightly constrained rosters with little slack) would be expected to show the GA's placement advantage more clearly; evaluating that case is left to future work (Section VII).
+
+Generation count falls, and wall-clock time rises, with problem size exactly as the adaptive parameter formulas of Eq.~(\ref{eq:complexity})--(4) predict: the Small scenario (population 83, nominal time budget under 6000\,ms) ran for 23.4$\pm$9.4 generations in 3592$\pm$1180\,ms, while the XLarge scenario (population 150, capped at the 6000\,ms nominal ceiling) ran only 2.7$\pm$0.5 generations yet took 14717$\pm$1796\,ms -- roughly 2.5$\times$ the nominal budget. This overshoot is a direct, measured consequence of the once-per-generation termination check described in Section IV-F: for large populations on large task sets, a single generation's decode-and-evaluate pass (population size $\times$ task count $\times$ candidate search) can itself take longer than the remaining time budget, so the loop always finishes the generation it is in before it can stop. Larger, harder instances therefore run \emph{fewer} generations in \emph{more} wall-clock time, evolving a large, complex population for only a handful of generations rather than a small population for many. For the synthetic scales tested here this remains well within interactive bounds (under 15 seconds even at XLarge), but it identifies a concrete limitation of the current termination check -- Section VII discusses checking the time budget within, rather than only between, generations for substantially larger departmental rosters.
+
+The fitness improvement is not just consistent in direction but statistically significant: a paired $t$-test on the 10 per-scenario (GA, baseline) fitness pairs rejects the null hypothesis of no difference at $p<0.01$ for every scenario (Small: $t(9){=}3.47$, $p{=}7.0e-03$; Medium: $t(9){=}12.81$, $p{=}4.4e-07$; Large: $t(9){=}9.25$, $p{=}6.8e-06$; XLarge: $t(9){=}7.01$, $p{=}6.3e-05$), with the strongest evidence at Medium scale. Because the same random problem instance is decoded by both methods in each trial, this is a matched-pairs design that controls for instance-to-instance difficulty variation, isolating the genetic algorithm's own contribution.
 
 \subsection{Convergence Behavior}
-Fig. \ref{fig:convergence} plots the best-of-generation fitness for a representative Medium-scenario trial. \input{fig_convergence_note.tex}
+Fig. \ref{fig:convergence} plots the best-of-generation fitness for a representative Medium-scenario trial. The trial (Medium-scale synthetic instance, 150 individuals per generation) placed all sessions from generation 1 and used its remaining 6 generations to refine the soft-objective terms; fitness rose from 3,999,769 to 3,999,778 (+9) before the run terminated on the adaptive time budget.
 
 \begin{figure}[t]
 \centering
-\input{fig_convergence.tex}
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.95\linewidth, height=4.2cm,
+  xlabel={Generation}, ylabel={Best fitness},
+  ymin=3999764, ymax=3999783,
+  xtick=data,
+  scaled y ticks=false, yticklabel style={/pgf/number format/.cd, fixed, 1000 sep={,}},
+  grid=major, grid style={dashed, gray!30},
+  mark size=1.6pt,
+]
+\addplot[thick, color=blue, mark=*] coordinates { (1,3999769) (2,3999769) (3,3999769) (4,3999769) (5,3999769) (6,3999778) (7,3999778) };
+\end{axis}
+\end{tikzpicture}
 \caption{Best-of-generation fitness over the run for a representative Medium-scenario trial. The large initial jump reflects the dominance of the placement term in Eq. (\ref{eq:fitness}); subsequent generations refine room-utilization and faculty-preference sub-objectives.}
 \label{fig:convergence}
 \end{figure}
 
 \subsection{Field Usage-Log Records}
-\input{field_usage_note.tex}
+The deployed application's usage-tracking log recorded 15 optimizer runs during development-stage testing, spanning problem sizes from 1 to 40 subjects and up to 5 faculty. 14 of 15 runs (93\%) placed every session with zero unscheduled conflicts; the single exception was a deliberately over-constrained 3-subject test case with only one room. Reported optimizer latency (client-side wall-clock time reported for the completed run) ranged from 3.8\,ms to 306.2\,ms (mean 31.8\,ms). The largest real run recorded -- 40 subjects, 130 sessions, 5 rooms, 5 faculty -- placed all 130 sessions. These field records are informal (ad hoc developer testing rather than a designed experiment) but are broadly consistent with the controlled benchmark's Medium/Large scenarios and support the same qualitative conclusion: the deployed system reliably reaches a fully conflict-free schedule at realistic departmental scale.
 
 \subsection{Threats to Validity}
 Three limitations bound how far these preliminary results generalize. First, the synthetic benchmark's subject/room/faculty distributions are plausible approximations of DEE's actual course mix, not a sample of real historical scheduling data; the field usage-log records partially address this but reflect ad hoc developer testing, not a full semester's real roster. Second, the regular-student cohort constraint (H6) -- the most combinatorially demanding of the nine hard constraints -- was not exercised in the controlled benchmark and is left to future work (Section VII). Third, all trials were executed on a single machine; absolute wall-clock numbers will vary with hardware, though the \emph{relative} GA-vs-baseline comparison and the qualitative scaling trend are expected to hold.
