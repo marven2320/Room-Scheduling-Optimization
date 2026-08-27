@@ -96,7 +96,8 @@ let state = {
   faculty: [], // [{id, name, subjectIds:[...]}]
   prospectus: [], // [{id, year, yearLabel, term, code, title, units, lec, lab}]
   targetTerm: "", // "<yearLabel>|<term>" — the regular-student cohort the optimizer keeps conflict-free
-  blocks: 1, // Number of Blocks (Optimize Schedule tab) — multiplies every subject into this many independent sections
+  blocksByProgram: {}, // program name -> Number of Blocks override (Optimize Schedule tab), driven by the uploaded prospectus
+  defaultBlocks: 1, // Number of Blocks for subjects with no prospectus link (or an unlisted program)
   schedule: null // {assignments:[...], unscheduled:[...], stats:{...}}
 };
 
@@ -146,7 +147,11 @@ function loadState(){
         state.faculty = Array.isArray(parsed.faculty) ? parsed.faculty : [];
         state.prospectus = Array.isArray(parsed.prospectus) ? parsed.prospectus : [];
         state.targetTerm = typeof parsed.targetTerm === "string" ? parsed.targetTerm : "";
-        state.blocks = Number.isFinite(parsed.blocks) && parsed.blocks>=1 ? Math.round(parsed.blocks) : 1;
+        // Legacy single "blocks" value (pre per-program Number of Blocks) becomes the new
+        // "Default" input, so an existing saved schedule's block count doesn't silently reset.
+        state.defaultBlocks = Number.isFinite(parsed.defaultBlocks) && parsed.defaultBlocks>=1 ? Math.round(parsed.defaultBlocks)
+          : (Number.isFinite(parsed.blocks) && parsed.blocks>=1 ? Math.round(parsed.blocks) : 1);
+        state.blocksByProgram = (parsed.blocksByProgram && typeof parsed.blocksByProgram==="object" && !Array.isArray(parsed.blocksByProgram)) ? parsed.blocksByProgram : {};
         state.schedule = parsed.schedule || null;
 
         let migratedAny = false;
@@ -246,11 +251,28 @@ function addRoom(name, capacity, openMin, closeMin, usageLimitPercent, roomType)
     usageLimitPercent: (usageLimitPercent==null || usageLimitPercent==="") ? 100 : usageLimitPercent,
     // "BOTH" (default, incl. any room from before this field existed) can host either type;
     // "LEC" / "LAB" is a hard constraint — the optimizer never offers it to the other type.
-    roomType: (roomType==="LEC"||roomType==="LAB") ? roomType : "BOTH"
+    roomType: (roomType==="LEC"||roomType==="LAB") ? roomType : "BOTH",
+    // Subjects manually marked (via the "Priority Subjects" modal) to prefer this room when
+    // more than one room could host them — e.g. a specialized lab kept for its equipment-
+    // matched subjects. Soft preference only — see priorityRoomIdsFor().
+    prioritySubjectIds: []
   });
   saveState();
   renderRooms();
   trackEvent("addRoom", { numRooms: state.rooms.length });
+}
+
+// Opens/saves the "Priority Subjects" picker for one room — which subjects should be
+// preferred for this room when more than one room could host them. A soft preference (see
+// priorityRoomIdsFor()), not a hard restriction: the room still hosts other subjects too, and
+// a priority subject still falls back to another room if this one is unavailable or full.
+function setRoomPrioritySubjects(roomId, subjectIds){
+  const room = state.rooms.find(r=>r.id===roomId);
+  if(!room) return;
+  room.prioritySubjectIds = subjectIds || [];
+  saveState();
+  renderRooms();
+  trackEvent("setRoomPrioritySubjects", { extra:{ subjectCount: (subjectIds||[]).length } });
 }
 function deleteRoom(id){
   if(!confirm("Delete this room? This cannot be undone.")) return;
@@ -281,6 +303,7 @@ function computeRoomLoad(occ, roomId){
 
 function renderRooms(){
   document.getElementById("badge-rooms").textContent = state.rooms.length;
+  updateOptimizeButtonState();
   const list = document.getElementById("room-list");
   if(state.rooms.length===0){
     list.innerHTML = '<div class="empty">No rooms yet. Add one above.</div>';
@@ -294,14 +317,20 @@ function renderRooms(){
     const sharedTag = usagePct<100 ? ` &nbsp;•&nbsp; <span class="tag-external" title="This app's optimizer will only book up to ${usagePct}% of this room's open slots — the rest stays free for other shared use.">🔀 Shared: ${usagePct}% (max ${maxAllowedSlots(r)} slots)</span>` : "";
     const roomType = r.roomType==="LEC"||r.roomType==="LAB" ? r.roomType : "BOTH";
     const typeTag = roomType!=="BOTH" ? ` &nbsp;•&nbsp; <span class="tag-${roomType.toLowerCase()}">${roomTypeLabels[roomType]}</span>` : "";
+    const priorityIds = Array.isArray(r.prioritySubjectIds) ? r.prioritySubjectIds : [];
+    const priorityCodes = priorityIds.map(id=>{ const s = state.subjects.find(x=>x.id===id); return s ? subjectCodeLabel(s) : null; }).filter(Boolean);
+    const priorityTag = priorityCodes.length
+      ? ` &nbsp;•&nbsp; <span class="tag-lab" title="This room is preferred for these subjects when possible.">⭐ Priority: ${priorityCodes.map(escapeHtml).join(", ")}</span>`
+      : "";
     return `<div class="card" data-id="${r.id}">
       <div class="icon">🏫</div>
       <div class="info">
         <div class="name">${escapeHtml(r.name)}</div>
-        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week${typeTag}${sharedTag}</div>
+        <div class="meta">${r.capacity ? "Capacity: "+r.capacity+" &nbsp;•&nbsp; " : ""}Open ${avail}/${total} half-hour slots this week${typeTag}${sharedTag}${priorityTag}</div>
       </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" data-action="edit-avail" data-id="${r.id}">Edit Availability</button>
+        <button class="btn btn-sm btn-ghost" data-action="edit-priority" data-id="${r.id}">Priority Subjects</button>
         <button class="btn btn-sm btn-danger" data-action="delete-room" data-id="${r.id}">Delete</button>
       </div>
     </div>`;
@@ -382,6 +411,7 @@ function deleteSubject(id){
 
 function renderSubjects(){
   document.getElementById("badge-subjects").textContent = state.subjects.length;
+  updateOptimizeButtonState();
   const list = document.getElementById("subject-list");
   if(state.subjects.length===0){
     list.innerHTML = '<div class="empty">No subjects yet. Add one above.</div>';
@@ -755,6 +785,7 @@ function renderProspectus(){
   populateSubjectProspectusSelect();
   populateTargetTermSelect();
   updateProspectusProgramList();
+  renderBlocksInputs();
 }
 
 // Autocomplete list for the "Program Name" input, drawn from programs already uploaded, so
@@ -763,6 +794,31 @@ function updateProspectusProgramList(){
   const list = document.getElementById("prospectus-program-list");
   if(!list) return;
   list.innerHTML = distinctPrograms().map(p=>`<option value="${escapeHtml(p)}"></option>`).join("");
+}
+
+// Optimize Schedule tab's "Number of Blocks" section — one input per distinct program
+// currently in the uploaded prospectus (so it grows/shrinks with what's actually uploaded,
+// instead of a single count applied to every program alike), plus the always-present
+// "Default" input for subjects with no prospectus link. Re-run whenever the prospectus
+// changes (see renderProspectus) so a newly-uploaded or newly-deleted program's row appears
+// or disappears immediately, without touching whatever counts are already set for the rest.
+function renderBlocksInputs(){
+  const container = document.getElementById("blocks-by-program-list");
+  if(container){
+    const programs = distinctPrograms();
+    if(programs.length===0){
+      container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">No prospectus uploaded yet — upload one on the Prospectus tab to set a block count per program here. Until then, every subject uses the Default count below.</div>';
+    } else {
+      container.innerHTML = programs.map(p=>`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+          <label style="min-width:240px;font-weight:600;font-size:13px;color:var(--text);">${escapeHtml(p)}</label>
+          <input type="number" min="1" value="${blocksForProgram(p)}" data-program="${escapeHtml(p)}" class="blocks-program-input" style="width:80px;">
+        </div>`
+      ).join("");
+    }
+  }
+  const defaultInput = document.getElementById("default-blocks-input");
+  if(defaultInput) defaultInput.value = state.defaultBlocks;
 }
 
 function deleteProspectusCourse(id){
@@ -948,6 +1004,31 @@ function closeAvailModal(){
   renderRooms();
 }
 
+let editingPriorityRoomId = null;
+function openPriorityModal(roomId){
+  const room = state.rooms.find(r=>r.id===roomId);
+  if(!room) return;
+  editingPriorityRoomId = roomId;
+  document.getElementById("priority-modal-title").textContent = "Priority Subjects — " + room.name;
+  const sel = document.getElementById("priority-subjects-select");
+  const current = new Set(Array.isArray(room.prioritySubjectIds) ? room.prioritySubjectIds : []);
+  // External-Assignment subjects never get a room match at all, so they're left out here —
+  // same filter populateFacultySubjectSelect() uses.
+  sel.innerHTML = state.subjects.filter(s=>!s.externalAssignment).map(s=>
+    `<option value="${s.id}" ${current.has(s.id)?"selected":""}>${escapeHtml(subjectCodeLabel(s))}</option>`
+  ).join("");
+  document.getElementById("priority-modal-backdrop").classList.add("open");
+}
+function closePriorityModal(){
+  if(editingPriorityRoomId){
+    const sel = document.getElementById("priority-subjects-select");
+    const chosen = Array.from(sel.selectedOptions).map(o=>o.value);
+    setRoomPrioritySubjects(editingPriorityRoomId, chosen);
+  }
+  document.getElementById("priority-modal-backdrop").classList.remove("open");
+  editingPriorityRoomId = null;
+}
+
 function renderAvailGrid(room){
   const table = document.getElementById("avail-grid-table");
   let html = "<tr><th></th>";
@@ -1084,15 +1165,41 @@ function buildSubjectFacultyMap(){
   return map;
 }
 
-// `blocks` (from the Optimize Schedule tab, default 1) multiplies EVERY subject into that many
-// independent, separately-scheduled copies — e.g. 3 parallel sections of the same course, each
-// competing for its own room/day/time/faculty. subjectId (faculty qualification, cohort
-// membership, color) stays the real subject's id, shared by every block; each block instead
-// gets its own `instanceKey`, used only to keep that ONE block/section's own sessions spread
-// across different days — so different blocks (and, for a room-capacity Lab split, different
-// sections within a block) never block each other off a day the way same-subject sessions do.
-function buildTasks(blocks){
-  blocks = Math.max(1, parseInt(blocks,10) || 1);
+// How many independent, separately-scheduled "blocks" (parallel sections) a subject's tasks
+// get replicated into. Driven off the Optimize Schedule tab's per-program inputs — each
+// distinct program in the uploaded prospectus can carry its own block count (e.g. a program
+// with 2 intake sections vs. one with just 1), resolved via the subject's linked Prospectus
+// Course; a subject with no prospectus link, or a program with no override set, falls back to
+// the single "Default (no prospectus link)" input.
+function blocksForProgram(program){
+  const v = state.blocksByProgram ? state.blocksByProgram[program] : null;
+  if(Number.isFinite(v) && v>=1) return Math.round(v);
+  const d = state.defaultBlocks;
+  return Number.isFinite(d) && d>=1 ? Math.round(d) : 1;
+}
+function blocksForSubject(s){
+  if(s.prospectusCourseId){
+    const course = state.prospectus.find(c=>c.id===s.prospectusCourseId);
+    if(course) return blocksForProgram(course.program || "General");
+  }
+  const d = state.defaultBlocks;
+  return Number.isFinite(d) && d>=1 ? Math.round(d) : 1;
+}
+// "program|yearLabel" cohort key -> that program's block count — lets schedule views decide
+// whether a "(Block N)" suffix is needed for that specific program/cohort, independently of
+// every other program's own block count.
+function blocksForCohortGroup(group){
+  return blocksForProgram((group||"").split("|")[0]);
+}
+
+// Each subject is expanded into blocksForSubject(s) independent, separately-scheduled copies
+// — e.g. 2 parallel sections of the same course, each competing for its own room/day/time/
+// faculty. subjectId (faculty qualification, cohort membership, color) stays the real
+// subject's id, shared by every block; each block instead gets its own `instanceKey`, used
+// only to keep that ONE block/section's own sessions spread across different days — so
+// different blocks (and, for a room-capacity Lab split, different sections within a block)
+// never block each other off a day the way same-subject sessions do.
+function buildTasks(){
   const tasks = [];
   const facultyMap = buildSubjectFacultyMap();
   const cohortGroups = buildCohortGroups(); // subjectId -> "program|yearLabel" cohort key, or absent
@@ -1102,6 +1209,7 @@ function buildTasks(blocks){
     const isCohort = !!cohortGroup;
     const externalAssignment = !!s.externalAssignment; // true = no room/faculty, class hours only (TBA/TBD)
     const allowSunday = isSundayExemptSubject(s); // constraint #1: Sunday only for NST001/NST002
+    const blocks = blocksForSubject(s);
     for(let b=0;b<blocks;b++){
       // Schedule output (Room/Faculty/Student views, List View, CSV) shows the course CODE
       // only — not the full prospectus title — to keep the plotted tables from getting
@@ -1165,6 +1273,17 @@ function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
 function roomAllowsType(room, subjectType){
   const rt = room.roomType==="LEC"||room.roomType==="LAB" ? room.roomType : "BOTH";
   return rt==="BOTH" || rt===subjectType;
+}
+
+// Which rooms (by id) have this subject manually marked as a Priority Subject (Rooms tab —
+// e.g. a specialized lab that should be used for its equipment-matched subjects whenever
+// possible). Soft preference only: the candidate ranking in runTrial() sorts these rooms
+// first, but a task still falls back to any other otherwise-valid room rather than going
+// unscheduled when none of its priority rooms have room.
+function priorityRoomIdsFor(subjectId){
+  const ids = new Set();
+  state.rooms.forEach(r=>{ if(Array.isArray(r.prioritySubjectIds) && r.prioritySubjectIds.includes(subjectId)) ids.add(r.id); });
+  return ids;
 }
 
 function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType){
@@ -1615,12 +1734,16 @@ function runTrial(tasksOrder){
         return;
       }
       // Respect the preferred pair priority order first (1. Mon/Wed, 2. Tue/Thu, 3. Fri/Sat when AUTO),
-      // then favor rooms already carrying load + tight packing (maximize utilization), then minimize wasted capacity.
+      // then favor this subject's manually-designated Priority Room(s) if any (Rooms tab), then
+      // favor rooms already carrying load + tight packing (maximize utilization), then minimize wasted capacity.
       const pairPriority = pk => pairKeys.indexOf(pk);
+      const priorityRoomIds = priorityRoomIdsFor(task.subjectId);
       const loadCache = {};
       allCandidates.sort((a,b)=>{
         const p = pairPriority(a.pairKey) - pairPriority(b.pairKey);
         if(p) return p;
+        const aPr = priorityRoomIds.has(a.roomId) ? 0 : 1, bPr = priorityRoomIds.has(b.roomId) ? 0 : 1;
+        if(aPr !== bPr) return aPr - bPr;
         const aLoad = (loadCache[a.roomId] ??= roomLoad(a.roomId));
         const bLoad = (loadCache[b.roomId] ??= roomLoad(b.roomId));
         const aScore = a.adj*10 + aLoad, bScore = b.adj*10 + bLoad;
@@ -1721,6 +1844,7 @@ function runTrial(tasksOrder){
     // Both are soft preferences only — a worse-but-only slot is still used, just sorted
     // after better ones.
     const isLab = task.subjectType === "LAB";
+    const priorityRoomIds = priorityRoomIdsFor(task.subjectId);
     const loadCache = {};
     allCandidates.sort((a,b)=>{
       if(isLab){
@@ -1730,6 +1854,11 @@ function runTrial(tasksOrder){
       }
       const aFri = a.day==="Fri" ? 1 : 0, bFri = b.day==="Fri" ? 1 : 0;
       if(aFri !== bFri) return aFri - bFri;
+      // Manually-designated Priority Room(s) for this subject (Rooms tab), if any — soft
+      // preference, checked after the lab-window/Friday preferences and before generic
+      // room-load packing.
+      const aPr = priorityRoomIds.has(a.roomId) ? 0 : 1, bPr = priorityRoomIds.has(b.roomId) ? 0 : 1;
+      if(aPr !== bPr) return aPr - bPr;
       const aLoad = (loadCache[a.roomId] ??= roomLoad(a.roomId));
       const bLoad = (loadCache[b.roomId] ??= roomLoad(b.roomId));
       const aScore = a.adj*10 + aLoad, bScore = b.adj*10 + bLoad;
@@ -1877,8 +2006,7 @@ async function optimizeSchedule(onProgress){
   // Assignment roster is schedulable with zero rooms defined.
   const needsRoom = state.subjects.some(s=>!s.externalAssignment);
   if(needsRoom && state.rooms.length===0) return null;
-  const blocksUsed = Math.max(1, parseInt(state.blocks,10) || 1);
-  const baseTasks = buildTasks(blocksUsed);
+  const baseTasks = buildTasks();
   if(baseTasks.length===0) return null;
   baseTasks.forEach((t,i)=> t.__gaId = i);
   const totalTasks = baseTasks.length;
@@ -1983,7 +2111,6 @@ async function optimizeSchedule(onProgress){
   }
   best.result.generationsRun = genCount;
   best.result.populationSize = popSize;
-  best.result.blocksUsed = blocksUsed;
   report(genCount, true);
   return best.result;
 }
@@ -2110,16 +2237,15 @@ function renderScheduleTab(){
   const cohortSelect = document.getElementById("sched-cohort-select");
   if(cohortSelect){
     // Only cohorts that actually have at least one scheduled (plotted) session — a cohort
-    // whose every course conflicted has nothing to show on a grid anyway. With 2+ blocks,
-    // each (cohortGroup, block) pair gets its own entry — see cohortCompositeKey().
-    const blocksUsed = sched.blocksUsed || 1;
+    // whose every course conflicted has nothing to show on a grid anyway. With 2+ blocks for
+    // that program, each (cohortGroup, block) pair gets its own entry — see cohortCompositeKey().
     const seen = new Set();
     const entries = [];
     sched.assignments.filter(a=>a.cohortGroup).forEach(a=>{
       const key = cohortCompositeKey(a.cohortGroup, a.blockIndex);
       if(seen.has(key)) return;
       seen.add(key);
-      const label = blocksUsed>=2 ? `${cohortGroupLabel(a.cohortGroup)} (Block ${(a.blockIndex||0)+1})` : cohortGroupLabel(a.cohortGroup);
+      const label = blocksForCohortGroup(a.cohortGroup)>=2 ? `${cohortGroupLabel(a.cohortGroup)} (Block ${(a.blockIndex||0)+1})` : cohortGroupLabel(a.cohortGroup);
       entries.push({ key, label });
     });
     entries.sort((a,b)=> a.label.localeCompare(b.label));
@@ -2250,7 +2376,7 @@ function renderFacultyGrid(faculty, sched){
 function renderCohortGrid(cohortKey, sched){
   const { group, blockIndex } = parseCohortComposite(cohortKey);
   const assignments = sched.assignments.filter(a=> a.cohortGroup===group && (a.blockIndex||0)===blockIndex);
-  const blocksUsed = sched.blocksUsed || 1;
+  const blocksUsed = blocksForCohortGroup(group);
   const blockSuffix = blocksUsed>=2 ? ` (Block ${blockIndex+1})` : "";
   const title = `🎓 ${escapeHtml(cohortGroupLabel(group))}${blockSuffix} — Regular Students`;
   const subtitle = `<p class="sub">${assignments.length} required session${assignments.length===1?"":"s"} this week — every course a regular student in this ${blocksUsed>=2?"block":"cohort"} takes.</p>`;
@@ -2317,7 +2443,7 @@ function exportCsv(){
   } else if(scheduleView === "cohort"){
     if(!scheduleCohortGroup){ alert("No regular-student cohort is selected or available — set a Target Semester and optimize again."); return; }
     const { group, blockIndex } = parseCohortComposite(scheduleCohortGroup);
-    const blocksUsed = state.schedule ? (state.schedule.blocksUsed || 1) : 1;
+    const blocksUsed = blocksForCohortGroup(group);
     const blockSuffix = blocksUsed>=2 ? ` (Block ${blockIndex+1})` : "";
     assignments = assignments.filter(a=> a.cohortGroup===group && (a.blockIndex||0)===blockIndex);
     filename = `schedule-cohort-${slugify(cohortGroupLabel(group)+blockSuffix)}.csv`;
@@ -2390,14 +2516,22 @@ document.getElementById("add-room-btn").addEventListener("click", ()=>{
   addRoom(name, cap, openMin, closeMin, usagePct, roomType);
   nameInput.value=""; capInput.value=""; usagePctInput.value="100";
   document.getElementById("room-type").value = "BOTH";
+  document.getElementById("add-room-btn").disabled = true; // cleared field -> not ready again until typed
   nameInput.focus();
 });
 
 document.getElementById("room-list").addEventListener("click",(e)=>{
   const editBtn = e.target.closest('[data-action="edit-avail"]');
+  const priorityBtn = e.target.closest('[data-action="edit-priority"]');
   const delBtn = e.target.closest('[data-action="delete-room"]');
   if(editBtn) openAvailModal(editBtn.dataset.id);
+  if(priorityBtn) openPriorityModal(priorityBtn.dataset.id);
   if(delBtn) deleteRoom(delBtn.dataset.id);
+});
+
+document.getElementById("priority-modal-done").addEventListener("click", closePriorityModal);
+document.getElementById("priority-modal-backdrop").addEventListener("click", (e)=>{
+  if(e.target.id === "priority-modal-backdrop") closePriorityModal();
 });
 
 const SPLIT_ELIGIBLE_SLOTS = "6"; // 6 x 30min = 3 hours
@@ -2468,6 +2602,7 @@ document.getElementById("add-subject-btn").addEventListener("click", ()=>{
   addSubject(name, durationSlots, sessions, size, isSplit, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment);
 
   nameInput.value=""; sizeInput.value="";
+  document.getElementById("add-subject-btn").disabled = true; // cleared field -> not ready again until typed
   splitToggleEl.checked = false;
   labSplitToggleEl.checked = false;
   sessionsInputEl.disabled = false;
@@ -2493,6 +2628,7 @@ document.getElementById("add-faculty-btn").addEventListener("click", ()=>{
   const subjectIds = Array.from(subjectsSelect.selectedOptions).map(o=>o.value);
   addFaculty(name, subjectIds);
   nameInput.value = "";
+  document.getElementById("add-faculty-btn").disabled = true; // cleared field -> not ready again until typed
   Array.from(subjectsSelect.options).forEach(o=> o.selected = false);
   nameInput.focus();
 });
@@ -2514,7 +2650,10 @@ document.getElementById("prospectus-list").addEventListener("click",(e)=>{
     // Jump to the manual-entry block already scoped to this program — fill in its name and
     // hand focus straight to Course Code so the next keystroke starts the new course.
     const programInput = document.getElementById("prospectus-program-input");
-    if(programInput) programInput.value = quickAddBtn.dataset.program;
+    if(programInput){
+      programInput.value = quickAddBtn.dataset.program;
+      programInput.dispatchEvent(new Event("input")); // programmatic value change -> re-check "+ Add Course" readiness
+    }
     document.getElementById("prospectus-manual-form").scrollIntoView({ behavior:"smooth", block:"center" });
     document.getElementById("prospectus-manual-code").focus();
   }
@@ -2552,6 +2691,7 @@ document.getElementById("prospectus-manual-add-btn").addEventListener("click", (
   // Keep Program/Year/Term as-is (adding several courses to the same block in a row is the
   // common case) and clear only the per-course fields, ready for the next entry.
   codeInput.value = ""; titleInput.value = ""; unitsInput.value = ""; lecInput.value = ""; labInput.value = "";
+  document.getElementById("prospectus-manual-add-btn").disabled = true; // cleared fields -> not ready again until typed
   codeInput.focus();
 });
 
@@ -2710,11 +2850,20 @@ document.getElementById("target-term-select").addEventListener("change",(e)=>{
   }
 });
 
-document.getElementById("global-blocks-input").addEventListener("change",(e)=>{
+document.getElementById("blocks-by-program-list").addEventListener("change",(e)=>{
+  const input = e.target.closest(".blocks-program-input");
+  if(!input) return;
+  let v = parseInt(input.value,10);
+  if(isNaN(v) || v<1) v = 1;
+  input.value = v;
+  state.blocksByProgram[input.dataset.program] = v;
+  saveState();
+});
+document.getElementById("default-blocks-input").addEventListener("change",(e)=>{
   let v = parseInt(e.target.value,10);
   if(isNaN(v) || v<1) v = 1;
   e.target.value = v;
-  state.blocks = v;
+  state.defaultBlocks = v;
   saveState();
 });
 
@@ -2841,6 +2990,53 @@ function updateGaModal(progress){
 
 document.getElementById("ga-modal-close").addEventListener("click", closeGaModal);
 
+/* ---------------------------------------------------------------------
+   FORM-READINESS BUTTON STATES
+   Proactively disables an "Add"/"Optimize" button (with a title tooltip explaining why)
+   whenever its required input isn't there yet, instead of only catching it after a click
+   via alert() — the alert-based checks stay in place too, as a safety net for any state
+   these listeners don't cover (e.g. a value changed programmatically).
+--------------------------------------------------------------------- */
+function updateOptimizeButtonState(){
+  const btn = document.getElementById("optimize-btn");
+  if(!btn) return;
+  const hasSubjects = state.subjects.length>0;
+  // A room is only required if at least one subject actually needs one — an all-External-
+  // Assignment subject list (every session's room/faculty handled elsewhere) is a valid
+  // scenario the optimizer can run with zero rooms defined.
+  const needsRoom = state.subjects.some(s=>!s.externalAssignment);
+  const hasRoomIfNeeded = !needsRoom || state.rooms.length>0;
+  const ok = hasSubjects && hasRoomIfNeeded;
+  btn.disabled = !ok;
+  btn.title = ok ? "" : !hasSubjects
+    ? "Add at least one subject first (Subjects tab)."
+    : "Add at least one room first (Rooms tab), or mark every subject as External Assignment.";
+}
+
+// Simple "+ Add X" forms: disabled until their one clearly-required text field has something
+// in it, re-checked on every keystroke.
+function wireRequiredFieldButton(inputIds, btnId, isReady){
+  const btn = document.getElementById(btnId);
+  if(!btn) return;
+  const update = ()=>{ btn.disabled = !isReady(); };
+  inputIds.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener("input", update);
+  });
+  update();
+}
+wireRequiredFieldButton(["room-name"], "add-room-btn", ()=> !!document.getElementById("room-name").value.trim());
+wireRequiredFieldButton(["subj-name"], "add-subject-btn", ()=> !!document.getElementById("subj-name").value.trim());
+wireRequiredFieldButton(["faculty-name"], "add-faculty-btn", ()=> !!document.getElementById("faculty-name").value.trim());
+wireRequiredFieldButton(["prospectus-program-input"], "prospectus-pdf-btn", ()=> !!document.getElementById("prospectus-program-input").value.trim());
+wireRequiredFieldButton(
+  ["prospectus-program-input", "prospectus-manual-code", "prospectus-manual-title"],
+  "prospectus-manual-add-btn",
+  ()=> !!document.getElementById("prospectus-program-input").value.trim()
+    && !!document.getElementById("prospectus-manual-code").value.trim()
+    && !!document.getElementById("prospectus-manual-title").value.trim()
+);
+
 document.getElementById("optimize-btn").addEventListener("click", async ()=>{
   if(state.subjects.length===0){ alert("Add at least one subject first."); return; }
   // A room is only required if at least one subject actually needs one — an all-External-
@@ -2848,12 +3044,21 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
   // scenario the optimizer can run with zero rooms defined.
   const needsRoom = state.subjects.some(s=>!s.externalAssignment);
   if(needsRoom && state.rooms.length===0){ alert("Add at least one room first (or mark every subject as External Assignment if none of them need one)."); return; }
-  // Sync Number of Blocks in case it was typed but never blurred/changed-out-of.
-  const blocksInput = document.getElementById("global-blocks-input");
-  let blocksVal = parseInt(blocksInput.value,10);
-  if(isNaN(blocksVal) || blocksVal<1) blocksVal = 1;
-  blocksInput.value = blocksVal;
-  state.blocks = blocksVal;
+  // Sync Number of Blocks (per-program + default) in case a field was typed but never
+  // blurred/changed-out-of.
+  document.querySelectorAll(".blocks-program-input").forEach(input=>{
+    let v = parseInt(input.value,10);
+    if(isNaN(v) || v<1) v = 1;
+    input.value = v;
+    state.blocksByProgram[input.dataset.program] = v;
+  });
+  const defaultBlocksInput = document.getElementById("default-blocks-input");
+  if(defaultBlocksInput){
+    let v = parseInt(defaultBlocksInput.value,10);
+    if(isNaN(v) || v<1) v = 1;
+    defaultBlocksInput.value = v;
+    state.defaultBlocks = v;
+  }
   saveState();
   const btn = document.getElementById("optimize-btn");
   const status = document.getElementById("optimize-status");
@@ -3241,7 +3446,8 @@ function importRoomsFromRows(dataRows){
       capacity: !isNaN(capRaw) && capRaw>0 ? capRaw : null,
       availability: parseAvailabilityString(cols[2]) || makeAvailability(),
       usageLimitPercent,
-      roomType
+      roomType,
+      prioritySubjectIds: []
     });
     added++;
   });
@@ -3405,7 +3611,6 @@ populateDurationSelect();
 populateRoomHoursSelects(document.getElementById("room-open-from"), document.getElementById("room-open-until"));
 populateProspectusManualSelects();
 refreshSplitUI();
-document.getElementById("global-blocks-input").value = state.blocks;
 renderRooms();
 renderSubjects();
 renderFaculty();
