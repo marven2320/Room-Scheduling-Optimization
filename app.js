@@ -2327,7 +2327,7 @@ function renderScheduleView(){
   if(scheduleView === "cohort"){
     const cohortKeys = Array.from(new Set(sched.assignments.filter(a=>a.cohortGroup).map(a=> cohortCompositeKey(a.cohortGroup, a.blockIndex))));
     if(cohortKeys.length===0){
-      panel.innerHTML = '<div class="empty">No regular-student cohorts in this schedule — set a Target Semester (above) and link subjects to prospectus courses, then optimize again.</div>';
+      panel.innerHTML = '<div class="empty">No regular-student cohorts in this schedule — set a Target Semester (Prospectus tab) and link subjects to prospectus courses, then optimize again.</div>';
       return;
     }
     const key = cohortKeys.includes(scheduleCohortGroup) ? scheduleCohortGroup : cohortKeys[0];
@@ -2487,7 +2487,7 @@ function exportCsv(){
     filename = `schedule-faculty-${slugify(faculty.name)}.csv`;
     scopeLabel = faculty.name;
   } else if(scheduleView === "cohort"){
-    if(!scheduleCohortGroup){ alert("No regular-student cohort is selected or available — set a Target Semester and optimize again."); return; }
+    if(!scheduleCohortGroup){ alert("No regular-student cohort is selected or available — set a Target Semester (Prospectus tab) and optimize again."); return; }
     const { group, blockIndex } = parseCohortComposite(scheduleCohortGroup);
     const blocksUsed = blocksForCohortGroup(group);
     const blockSuffix = blocksUsed>=2 ? ` (Block ${blockIndex+1})` : "";

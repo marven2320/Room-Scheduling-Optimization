@@ -203,7 +203,7 @@
   <section id="tab-prospectus" class="tab-content active">
     <div class="panel no-print">
       <h2>Upload Program Prospectus</h2>
-      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other, and each uploaded program gets its own block below. Pick a Target Semester on the Schedule tab to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. No file to upload? Use <b>Add a Course Manually</b> below instead. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import or re-entry.</p>
+      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other, and each uploaded program gets its own block below. Pick a Target Semester below to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. No file to upload? Use <b>Add a Course Manually</b> below instead. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import or re-entry.</p>
       <div class="field" style="margin-bottom:12px;">
         <label>Program Name</label>
         <input type="text" id="prospectus-program-input" list="prospectus-program-list" placeholder="e.g. BS Electrical Engineering" style="min-width:280px;">
@@ -219,6 +219,13 @@
         <button class="btn btn-sm btn-danger" id="prospectus-clear-btn">Clear All</button>
       </div>
       <div id="prospectus-pdf-status" style="color:var(--text-dim);font-size:13px;"></div>
+      <div class="field" style="margin-top:12px;">
+        <label>Target Semester (loads every program's subjects &amp; avoids conflicts per program/year level)</label>
+        <select id="target-term-select" style="min-width:280px;">
+          <option value="">— none (no curriculum-conflict check) —</option>
+        </select>
+        <div id="target-term-hint" style="color:var(--text-dim);font-size:12px;margin-top:4px;"></div>
+      </div>
     </div>
 
     <div class="panel no-print">
@@ -288,18 +295,11 @@
   <section id="tab-schedule" class="tab-content">
     <div class="panel no-print">
       <h2>Optimize &amp; View Schedule</h2>
-      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. Hard constraints (never violated): a room's <b>Room Type</b> (Rooms tab) — a LEC-only or LAB-only room is never offered to the other subject type; a room's <b>Allowable Usage %</b> — never booked past its shared-usage cap; every entry in the <b>Fixed Schedule</b> tab, if any — locked in place before anything new is placed, so nothing new can double-book its room, faculty, or regular-student cohort. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also prefers a room's manually-set <b>Priority Subjects</b> (Rooms tab), keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other) — and each program's own <b>Number of Blocks</b> below controls how many parallel sections of its subjects get scheduled.</p>
+      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. Hard constraints (never violated): a room's <b>Room Type</b> (Rooms tab) — a LEC-only or LAB-only room is never offered to the other subject type; a room's <b>Allowable Usage %</b> — never booked past its shared-usage cap; every entry in the <b>Fixed Schedule</b> tab, if any — locked in place before anything new is placed, so nothing new can double-book its room, faculty, or regular-student cohort. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also prefers a room's manually-set <b>Priority Subjects</b> (Rooms tab), keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set (Prospectus tab), <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other) — and each program's own <b>Number of Blocks</b> below controls how many parallel sections of its subjects get scheduled.</p>
       <div class="sched-toolbar">
         <button class="btn btn-primary btn-lg" id="optimize-btn">⚡ Optimize Scheduling</button>
         <button class="btn btn-ghost" id="clear-schedule-btn">Clear Result</button>
         <span id="optimize-status" style="color:var(--text-dim);font-size:13px;"></span>
-      </div>
-      <div class="field" style="margin-top:12px;">
-        <label>Target Semester (loads every program's subjects &amp; avoids conflicts per program/year level)</label>
-        <select id="target-term-select" style="min-width:280px;">
-          <option value="">— none (no curriculum-conflict check) —</option>
-        </select>
-        <div id="target-term-hint" style="color:var(--text-dim);font-size:12px;margin-top:4px;"></div>
       </div>
       <div class="field" style="margin-top:12px;">
         <label>Number of Blocks</label>
@@ -331,12 +331,12 @@
           </div>
         </div>
         <div class="flow-arrow">↓</div>
-        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+        <div class="flow-step" role="button" tabindex="0" data-jump="prospectus">
           <div class="flow-num">2</div>
           <div class="flow-icon">🗓️</div>
           <div class="flow-body">
             <div class="flow-title">Select the Target Semester to be optimized</div>
-            <div class="flow-sub">Optimize Schedule tab</div>
+            <div class="flow-sub">Prospectus tab</div>
             <p>Pick First Semester / Second Semester / Summer Term — this auto-loads every uploaded program's courses for that term straight into the Subjects tab, and turns on regular-student conflict-checking (kept separate per program <i>and</i> year level). No prospectus uploaded? Add subjects by hand instead in the Subjects tab.</p>
           </div>
         </div>
@@ -574,6 +574,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
