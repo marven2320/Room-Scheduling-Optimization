@@ -24,6 +24,7 @@
   <button class="tab-btn" data-tab="subjects">Subjects <span class="tab-badge" id="badge-subjects">0</span></button>
   <button class="tab-btn" data-tab="rooms">Rooms <span class="tab-badge" id="badge-rooms">0</span></button>
   <button class="tab-btn" data-tab="faculty">Faculty <span class="tab-badge" id="badge-faculty">0</span></button>
+  <button class="tab-btn" data-tab="fixed">Fixed Schedule <span class="tab-badge" id="badge-fixed">0</span></button>
   <button class="tab-btn" data-tab="schedule">Optimize Schedule</button>
   <button class="tab-btn" data-tab="guide">📘 Guide</button>
   <button class="tab-btn" data-tab="usage">📊 App Usage Summary</button>
@@ -262,11 +263,32 @@
     </div>
   </section>
 
+  <!-- FIXED SCHEDULE TAB -->
+  <section id="tab-fixed" class="tab-content">
+    <div class="panel no-print">
+      <h2>Import a Fixed Schedule</h2>
+      <p class="sub">Sessions already decided ahead of time — imported here, they're treated as <b>hard constraints</b> the optimizer must respect: their room/day/time is locked in before anything new is placed, so nothing new can double-book that room, and (when Faculty and/or Program + Year Level are given) they also block faculty and regular-student cohort conflicts the same way a newly-scheduled session would. The easiest way to build one: optimize a schedule on the <b>Optimize Schedule</b> tab first, then use its "📌 Export for Fixed Schedule" button — that file imports back in here with no changes needed. CSV import is the reliable option; only <b>Subject</b>, <b>Room</b>, <b>Day</b>, <b>Start</b>, and <b>End</b> are required — Type, Faculty, Program, Year Level, and Block are optional. A row whose Room doesn't match an existing room (Rooms tab) is skipped, since there'd be nothing real for it to lock in place.</p>
+      <div class="io-toolbar">
+        <button class="btn btn-sm btn-ghost" id="fixed-export-btn">⬇ Export CSV</button>
+        <button class="btn btn-sm btn-ghost" id="fixed-template-btn">📄 Download Template</button>
+        <button class="btn btn-sm btn-ghost" id="fixed-import-btn">⬆ Import CSV</button>
+        <input type="file" id="fixed-import-file" accept=".csv,text/csv" style="display:none;">
+        <button class="btn btn-sm btn-danger" id="fixed-clear-btn">Clear All</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Fixed Schedule</h2>
+      <p class="sub">Delete a single entry below, or Clear All above to start over. These stay separate from an optimized result — re-running "Optimize Scheduling" always keeps every entry here locked in place.</p>
+      <div id="fixed-schedule-list"></div>
+    </div>
+  </section>
+
   <!-- SCHEDULE TAB -->
   <section id="tab-schedule" class="tab-content">
     <div class="panel no-print">
       <h2>Optimize &amp; View Schedule</h2>
-      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. A room's <b>Room Type</b> (Rooms tab) is a hard constraint: a LEC-only or LAB-only room is never offered to the other subject type. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other).</p>
+      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. Hard constraints (never violated): a room's <b>Room Type</b> (Rooms tab) — a LEC-only or LAB-only room is never offered to the other subject type; a room's <b>Allowable Usage %</b> — never booked past its shared-usage cap; every entry in the <b>Fixed Schedule</b> tab, if any — locked in place before anything new is placed, so nothing new can double-book its room, faculty, or regular-student cohort. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also prefers a room's manually-set <b>Priority Subjects</b> (Rooms tab), keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other) — and each program's own <b>Number of Blocks</b> below controls how many parallel sections of its subjects get scheduled.</p>
       <div class="sched-toolbar">
         <button class="btn btn-primary btn-lg" id="optimize-btn">⚡ Optimize Scheduling</button>
         <button class="btn btn-ghost" id="clear-schedule-btn">Clear Result</button>
@@ -349,8 +371,18 @@
           </div>
         </div>
         <div class="flow-arrow">↓</div>
-        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+        <div class="flow-step" role="button" tabindex="0" data-jump="fixed">
           <div class="flow-num">6</div>
+          <div class="flow-icon">🔒</div>
+          <div class="flow-body">
+            <div class="flow-title">Import a Fixed Schedule (optional)</div>
+            <div class="flow-sub">Fixed Schedule tab</div>
+            <p>Already have sessions decided ahead of time (e.g. carried over from last semester)? Import them here as a CSV — the optimizer treats every entry as locked in place: a hard constraint nothing new can double-book, on top of every other constraint. Nothing to import yet? Skip this step; you can always come back and add one after optimizing (see Step 8).</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+          <div class="flow-num">7</div>
           <div class="flow-icon">⚡</div>
           <div class="flow-body">
             <div class="flow-title">Set Number of Blocks and run the optimization</div>
@@ -360,12 +392,12 @@
         </div>
         <div class="flow-arrow">↓</div>
         <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
-          <div class="flow-num">7</div>
+          <div class="flow-num">8</div>
           <div class="flow-icon">📋</div>
           <div class="flow-body">
             <div class="flow-title">Review the results below</div>
             <div class="flow-sub">Optimize Schedule tab — Schedule Results section</div>
-            <p>Switch <b>View</b> between <b>Room Timetable</b>, <b>Faculty Schedule</b>, <b>Regular-Student Schedule</b>, and <b>List View</b> — pick the specific room/faculty member/cohort from the dropdown next to it. Anything unplaced appears under <b>Scheduling Conflicts</b> with a specific reason. Finish with <b>🖨 Print</b> or <b>⬇ Export CSV</b>.</p>
+            <p>Switch <b>View</b> between <b>Room Timetable</b>, <b>Faculty Schedule</b>, <b>Regular-Student Schedule</b>, and <b>List View</b> — pick the specific room/faculty member/cohort from the dropdown next to it. Anything unplaced appears under <b>Scheduling Conflicts</b> with a specific reason. Finish with <b>🖨 Print</b>, <b>⬇ Export CSV</b>, or <b>📌 Export for Fixed Schedule</b> to reuse this result as next semester's Fixed Schedule.</p>
           </div>
         </div>
       </div>
@@ -400,6 +432,10 @@
       <details class="faq-item">
         <summary>Do I have to upload a CSV or PDF to add a prospectus course?</summary>
         <div>No — the <b>Add a Course Manually</b> block on the Prospectus tab adds one course at a time to whichever Program Name is entered, with no file needed. It's also how you start a brand-new program from scratch. Each already-uploaded program's block has its own "+ Add Course" button that jumps there with that program's name already filled in, so you can top up a program with a few extra courses without retyping its name or re-uploading a file. Manually-added courses follow the exact same Program + Year + Term + Code duplicate check as CSV/PDF import, and count toward the same regular-student conflict-checking as any other prospectus course.</div>
+      </details>
+      <details class="faq-item">
+        <summary>What's the difference between a Fixed Schedule and just optimizing every time?</summary>
+        <div>A Fixed Schedule entry is treated as already decided — the optimizer locks its room/day/time in place before considering anything new, so it can never be moved, replaced, or double-booked by a new session, and (when Faculty and/or Program + Year Level are set on that entry) it also blocks faculty and regular-student cohort conflicts the same way a newly-scheduled session would. Use it for sessions arranged outside this app, or to carry a previous semester's schedule forward as a starting point: optimize once, use <b>📌 Export for Fixed Schedule</b> on the results, then import that file next semester before optimizing again.</div>
       </details>
       <details class="faq-item">
         <summary>Why did a subject end up in "Scheduling Conflicts" instead of being scheduled?</summary>
@@ -538,6 +574,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
