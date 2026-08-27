@@ -683,6 +683,18 @@ function populateTargetTermSelect(){
   updateTargetTermHint();
 }
 
+// One-time setup for the "Add a Course Manually" block's Year Level / Term selects — both are
+// fixed vocabularies (YEAR_LABEL_TO_NUM's keys, PROSPECTUS_TERMS), same as the CSV template and
+// the PDF-review modal use, so a manually-added course's yearLabel/term are always already in
+// the exact canonical form the rest of the app (buildCohortGroups, autoPopulateSubjectsForTerm,
+// duplicate detection) expects — no free-text normalization needed on this path.
+function populateProspectusManualSelects(){
+  const yearSel = document.getElementById("prospectus-manual-year");
+  const termSel = document.getElementById("prospectus-manual-term");
+  if(yearSel) yearSel.innerHTML = Object.keys(YEAR_LABEL_TO_NUM).map(y=> `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+  if(termSel) termSel.innerHTML = PROSPECTUS_TERMS.map(t=> `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+}
+
 function renderProspectus(){
   const badge = document.getElementById("badge-prospectus");
   // Counts uploaded PROGRAMS, not individual courses — a badge of "74" (course count) reads
@@ -733,7 +745,8 @@ function renderProspectus(){
       }).join("");
       return `<div class="prospectus-program-group">
         <div class="prospectus-program-title">🎓 ${escapeHtml(program)} <span class="tag-external" style="margin-left:8px;">${courses.length} course${courses.length===1?"":"s"}</span>
-          <button class="btn btn-sm btn-danger" data-action="delete-prospectus-program" data-program="${escapeHtml(program)}" style="margin-left:10px;">Delete Program</button>
+          <button class="btn btn-sm btn-ghost" data-action="quick-add-course" data-program="${escapeHtml(program)}" style="margin-left:10px;">+ Add Course</button>
+          <button class="btn btn-sm btn-danger" data-action="delete-prospectus-program" data-program="${escapeHtml(program)}" style="margin-left:6px;">Delete Program</button>
         </div>
         ${termsHtml}
       </div>`;
@@ -843,6 +856,41 @@ function importProspectusFromRows(dataRows, defaultProgram){
   renderProspectus();
   trackEvent("importProspectusCsv", { extra:{ added, skipped, duplicates } });
   return { added, skipped, duplicates };
+}
+
+// Manual single-course entry (the "Add a Course Manually" block) — an input-block alternative
+// to CSV/PDF import, one course at a time, scoped to a single program. Reuses the exact same
+// required-field check and prospectusDupKey() duplicate constraint as importProspectusFromRows()
+// so a hand-typed course is indistinguishable, to every downstream constraint (regular-student
+// cohort grouping in buildCohortGroups, Target-Semester auto-populate, duplicate detection on a
+// later CSV re-import), from one that came in via CSV or PDF.
+function addProspectusCourseManual(program, yearLabel, term, code, title, units, lec, lab){
+  program = (program||"").trim();
+  yearLabel = (yearLabel||"").trim();
+  term = normalizeTermValue(term);
+  code = (code||"").trim();
+  title = (title||"").trim();
+  if(!program || !yearLabel || !term || !code || !title){
+    return { ok:false, reason:"missing" };
+  }
+  const key = prospectusDupKey(program, yearLabel, term, code);
+  const isDup = state.prospectus.some(c=> prospectusDupKey(c.program, c.yearLabel, c.term, c.code)===key);
+  if(isDup){
+    return { ok:false, reason:"duplicate" };
+  }
+  state.prospectus.push({
+    id: genId("psc"),
+    program,
+    year: YEAR_LABEL_TO_NUM[yearLabel] || null,
+    yearLabel, term, code, title,
+    units: (units===null || units==="" || isNaN(units)) ? null : units,
+    lec: (lec===null || lec==="" || isNaN(lec)) ? 0 : lec,
+    lab: (lab===null || lab==="" || isNaN(lab)) ? 0 : lab
+  });
+  saveState();
+  renderProspectus();
+  trackEvent("addProspectusCourseManual");
+  return { ok:true };
 }
 
 /* --- PDF upload + review-before-import (parsing itself lives in prospectus-pdf.js) --- */
@@ -2459,10 +2507,53 @@ document.getElementById("delete-faculty-btn").addEventListener("click", ()=>{
 document.getElementById("prospectus-list").addEventListener("click",(e)=>{
   const delBtn = e.target.closest('[data-action="delete-prospectus-course"]');
   const delProgramBtn = e.target.closest('[data-action="delete-prospectus-program"]');
+  const quickAddBtn = e.target.closest('[data-action="quick-add-course"]');
   if(delBtn) deleteProspectusCourse(delBtn.dataset.id);
   if(delProgramBtn) deleteProspectusProgram(delProgramBtn.dataset.program);
+  if(quickAddBtn){
+    // Jump to the manual-entry block already scoped to this program — fill in its name and
+    // hand focus straight to Course Code so the next keystroke starts the new course.
+    const programInput = document.getElementById("prospectus-program-input");
+    if(programInput) programInput.value = quickAddBtn.dataset.program;
+    document.getElementById("prospectus-manual-form").scrollIntoView({ behavior:"smooth", block:"center" });
+    document.getElementById("prospectus-manual-code").focus();
+  }
 });
 document.getElementById("prospectus-clear-btn").addEventListener("click", clearProspectus);
+
+document.getElementById("prospectus-manual-add-btn").addEventListener("click", ()=>{
+  const programInput = document.getElementById("prospectus-program-input");
+  const yearSel = document.getElementById("prospectus-manual-year");
+  const termSel = document.getElementById("prospectus-manual-term");
+  const codeInput = document.getElementById("prospectus-manual-code");
+  const titleInput = document.getElementById("prospectus-manual-title");
+  const unitsInput = document.getElementById("prospectus-manual-units");
+  const lecInput = document.getElementById("prospectus-manual-lec");
+  const labInput = document.getElementById("prospectus-manual-lab");
+
+  const program = programInput.value.trim();
+  if(!program){ alert('Enter a "Program Name" above first (e.g. "BS Electrical Engineering").'); programInput.focus(); return; }
+  const code = codeInput.value.trim();
+  if(!code){ alert("Please enter a course code."); codeInput.focus(); return; }
+  const title = titleInput.value.trim();
+  if(!title){ alert("Please enter a course title."); titleInput.focus(); return; }
+
+  const result = addProspectusCourseManual(
+    program, yearSel.value, termSel.value, code, title,
+    unitsInput.value===""?null:parseFloat(unitsInput.value),
+    lecInput.value===""?null:parseInt(lecInput.value,10),
+    labInput.value===""?null:parseInt(labInput.value,10)
+  );
+  if(!result.ok){
+    if(result.reason==="duplicate") alert(`"${code}" is already in ${program} — ${yearSel.value}, ${termSel.value}. Skipped as a duplicate.`);
+    else alert("Please fill in Year Level, Term, Course Code, and Course Title.");
+    return;
+  }
+  // Keep Program/Year/Term as-is (adding several courses to the same block in a row is the
+  // common case) and clear only the per-course fields, ready for the next entry.
+  codeInput.value = ""; titleInput.value = ""; unitsInput.value = ""; lecInput.value = ""; labInput.value = "";
+  codeInput.focus();
+});
 
 document.getElementById("prospectus-export-btn").addEventListener("click", exportProspectusCsv);
 document.getElementById("prospectus-template-btn").addEventListener("click", downloadProspectusTemplate);
@@ -3312,6 +3403,7 @@ document.getElementById("faculty-import-file").addEventListener("change", (e)=>{
 --------------------------------------------------------------------- */
 populateDurationSelect();
 populateRoomHoursSelects(document.getElementById("room-open-from"), document.getElementById("room-open-until"));
+populateProspectusManualSelects();
 refreshSplitUI();
 document.getElementById("global-blocks-input").value = state.blocks;
 renderRooms();

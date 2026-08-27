@@ -202,7 +202,7 @@
   <section id="tab-prospectus" class="tab-content">
     <div class="panel no-print">
       <h2>Upload Program Prospectus</h2>
-      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other. Pick a Target Semester on the Schedule tab to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import.</p>
+      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other, and each uploaded program gets its own block below. Pick a Target Semester on the Schedule tab to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. No file to upload? Use <b>Add a Course Manually</b> below instead. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import or re-entry.</p>
       <div class="field" style="margin-bottom:12px;">
         <label>Program Name</label>
         <input type="text" id="prospectus-program-input" list="prospectus-program-list" placeholder="e.g. BS Electrical Engineering" style="min-width:280px;">
@@ -218,6 +218,42 @@
         <button class="btn btn-sm btn-danger" id="prospectus-clear-btn">Clear All</button>
       </div>
       <div id="prospectus-pdf-status" style="color:var(--text-dim);font-size:13px;"></div>
+    </div>
+
+    <div class="panel no-print">
+      <h2>Add a Course Manually</h2>
+      <p class="sub">Add one course at a time to the <b>Program Name</b> above — no CSV/PDF needed. Use this to enter a course by hand, or to add a few extra courses to an already-uploaded program (click "+ Add Course" on that program's block below to jump here with its name filled in). The same Program + Year + Term + Code duplicate check as CSV import applies, so re-adding an existing course is safely skipped.</p>
+      <div class="form-row" id="prospectus-manual-form">
+        <div class="field">
+          <label>Year Level</label>
+          <select id="prospectus-manual-year" style="min-width:130px;"></select>
+        </div>
+        <div class="field">
+          <label>Term</label>
+          <select id="prospectus-manual-term" style="min-width:160px;"></select>
+        </div>
+        <div class="field">
+          <label>Course Code</label>
+          <input type="text" id="prospectus-manual-code" placeholder="e.g. MAT060" style="min-width:140px;">
+        </div>
+        <div class="field">
+          <label>Course Title</label>
+          <input type="text" id="prospectus-manual-title" placeholder="e.g. Calculus with Analytical Geometry 1" style="min-width:260px;">
+        </div>
+        <div class="field">
+          <label>Units</label>
+          <input type="number" id="prospectus-manual-units" placeholder="e.g. 4" min="0" step="0.5" style="width:90px;">
+        </div>
+        <div class="field">
+          <label>Lec Hrs/Week</label>
+          <input type="number" id="prospectus-manual-lec" placeholder="e.g. 4" min="0" style="width:110px;">
+        </div>
+        <div class="field">
+          <label>Lab Hrs/Week</label>
+          <input type="number" id="prospectus-manual-lab" placeholder="e.g. 0" min="0" style="width:110px;">
+        </div>
+        <button class="btn btn-primary" id="prospectus-manual-add-btn">+ Add Course</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -355,7 +391,11 @@
       </details>
       <details class="faq-item">
         <summary>Can I upload more than one degree program's prospectus?</summary>
-        <div>Yes — type a different Program Name before each upload. Courses are grouped and displayed by program in the Prospectus tab, and regular-student conflict-checking treats each program's own year level as an independent cohort, so different programs never block each other even when scheduled in the same run.</div>
+        <div>Yes — type a different Program Name before each upload (or before using "Add a Course Manually"). Courses are grouped and displayed as a separate block per program in the Prospectus tab, and regular-student conflict-checking treats each program's own year level as an independent cohort, so different programs never block each other even when scheduled in the same run.</div>
+      </details>
+      <details class="faq-item">
+        <summary>Do I have to upload a CSV or PDF to add a prospectus course?</summary>
+        <div>No — the <b>Add a Course Manually</b> block on the Prospectus tab adds one course at a time to whichever Program Name is entered, with no file needed. It's also how you start a brand-new program from scratch. Each already-uploaded program's block has its own "+ Add Course" button that jumps there with that program's name already filled in, so you can top up a program with a few extra courses without retyping its name or re-uploading a file. Manually-added courses follow the exact same Program + Year + Term + Code duplicate check as CSV/PDF import, and count toward the same regular-student conflict-checking as any other prospectus course.</div>
       </details>
       <details class="faq-item">
         <summary>Why did a subject end up in "Scheduling Conflicts" instead of being scheduled?</summary>
