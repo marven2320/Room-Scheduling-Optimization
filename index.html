@@ -208,6 +208,7 @@
         <label>Program Name</label>
         <input type="text" id="prospectus-program-input" list="prospectus-program-list" placeholder="e.g. BS Electrical Engineering" style="min-width:280px;">
         <datalist id="prospectus-program-list"></datalist>
+        <div style="color:var(--text-dim);font-size:12px;margin-top:4px;">Type this <b>before</b> importing — required for PDF upload, and for any CSV that doesn't already have its own <b>Program</b> column (e.g. an older prospectus file) — every course gets tagged with it.</div>
       </div>
       <div class="io-toolbar">
         <button class="btn btn-sm btn-ghost" id="prospectus-export-btn">⬇ Export CSV</button>
@@ -574,6 +575,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

@@ -892,7 +892,7 @@ function downloadProspectusTemplate(){
 // "Program Name" field). Duplicate rows (same Program+Year+Term+Code as something already in
 // the prospectus, or repeated within this same import) are skipped and counted separately.
 function importProspectusFromRows(dataRows, defaultProgram){
-  let added = 0, skipped = 0, duplicates = 0;
+  let added = 0, skipped = 0, duplicates = 0, skippedNoProgram = 0;
   const seen = new Set(state.prospectus.map(c=> prospectusDupKey(c.program, c.yearLabel, c.term, c.code)));
   dataRows.forEach(cols=>{
     // Auto-detect an old-format row (pre-multi-program: Year,Term,Code,Title,Units,Lec,Lab —
@@ -908,7 +908,15 @@ function importProspectusFromRows(dataRows, defaultProgram){
     const term = normalizeTermValue(cols[2+off]);
     const code = (cols[3+off]||"").trim();
     const title = (cols[4+off]||"").trim();
-    if(!program || !yearLabel || !term || !code || !title){ skipped++; return; }
+    if(!program){
+      // An old-format file (no Program column) with no "Program Name" typed in above has
+      // nothing to tag these rows with — flagged separately from other missing-field rows so
+      // the import summary can name the actual fix (type a Program Name, then re-import)
+      // instead of a generic "missing required fields" message that doesn't point anywhere.
+      if(yearLabel && term && code && title) skippedNoProgram++; else skipped++;
+      return;
+    }
+    if(!yearLabel || !term || !code || !title){ skipped++; return; }
     const key = prospectusDupKey(program, yearLabel, term, code);
     if(seen.has(key)){ duplicates++; return; }
     seen.add(key);
@@ -928,8 +936,8 @@ function importProspectusFromRows(dataRows, defaultProgram){
   });
   saveState();
   renderProspectus();
-  trackEvent("importProspectusCsv", { extra:{ added, skipped, duplicates } });
-  return { added, skipped, duplicates };
+  trackEvent("importProspectusCsv", { extra:{ added, skipped, duplicates, skippedNoProgram } });
+  return { added, skipped, duplicates, skippedNoProgram };
 }
 
 // Manual single-course entry (the "Add a Course Manually" block) — an input-block alternative
@@ -2929,7 +2937,7 @@ document.getElementById("prospectus-import-file").addEventListener("change", (e)
   const programInput = document.getElementById("prospectus-program-input");
   const defaultProgram = programInput ? programInput.value.trim() : "";
   if(file) handleCsvImport(file, (rows)=> importProspectusFromRows(rows, defaultProgram), (r)=>
-    `Imported ${r.added} prospectus course(s).${r.duplicates ? ` Skipped ${r.duplicates} duplicate(s) already in your prospectus.` : ""}${r.skipped ? ` Skipped ${r.skipped} row(s) missing Program/Year/Term/Code/Title.` : ""}`
+    `Imported ${r.added} prospectus course(s).${r.duplicates ? ` Skipped ${r.duplicates} duplicate(s) already in your prospectus.` : ""}${r.skippedNoProgram ? ` Skipped ${r.skippedNoProgram} row(s) with no Program column and no "Program Name" typed above — type a Program Name above first, then re-import this same file so every row gets tagged with it.` : ""}${r.skipped ? ` Skipped ${r.skipped} row(s) missing Year/Term/Code/Title.` : ""}`
   , ["program", "year"]);
   e.target.value = "";
 });
