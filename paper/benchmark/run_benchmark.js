@@ -26,12 +26,14 @@ async function runOne(problem) {
     faculty: problem.faculty,
     prospectus: [],
     targetTerm: "",
-    blocks: 1,
+    blocksByProgram: {},
+    defaultBlocks: 1,
+    fixedSchedule: [],
     schedule: null,
   });
 
   // Greedy baseline: decode ONLY the most-constrained-first heuristic order, no GA evolution.
-  const baseTasks = core.buildTasks(1);
+  const baseTasks = core.buildTasks();
   baseTasks.forEach((t, i) => (t.__gaId = i));
   const heuristicOrder = baseTasks.slice().sort((a, b) => (b.sortWeight - a.sortWeight) || ((b.size || 0) - (a.size || 0)));
   const tBase0 = performance.now();

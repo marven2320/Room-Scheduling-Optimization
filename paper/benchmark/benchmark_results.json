@@ -8,8 +8,8 @@
     },
     "runs": [
       {
-        "wallMs": 3999.236191,
-        "generationsRun": 26,
+        "wallMs": 94.006167,
+        "generationsRun": 1,
         "populationSize": 83,
         "scheduledCount": 14,
         "totalSessions": 14,
@@ -18,11 +18,11 @@
         "activeRoomDayCount": 3,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 0,
+        "facultyNoBreakCount": 1,
         "facultyGapScore": 0,
-        "fitness": 1399982,
+        "fitness": 1399967,
         "baseline": {
-          "wallMs": 11.260922000000008,
+          "wallMs": 6.061333000000001,
           "scheduledCount": 14,
           "totalSessions": 14,
           "placementRate": 1,
@@ -30,13 +30,13 @@
           "activeRoomDayCount": 3,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 2,
-          "fitness": 1399936
+          "facultyNoBreakCount": 1,
+          "fitness": 1399927
         }
       },
       {
-        "wallMs": 125.80137500000001,
-        "generationsRun": 1,
+        "wallMs": 3655.180208,
+        "generationsRun": 77,
         "populationSize": 78,
         "scheduledCount": 11,
         "totalSessions": 13,
@@ -45,11 +45,11 @@
         "activeRoomDayCount": 5,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 1,
+        "facultyNoBreakCount": 0,
         "facultyGapScore": 0,
-        "fitness": 1099955,
+        "fitness": 1099970,
         "baseline": {
-          "wallMs": 3.0838330000001406,
+          "wallMs": 0.901457999999991,
           "scheduledCount": 11,
           "totalSessions": 13,
           "placementRate": 0.8461538461538461,
@@ -58,12 +58,12 @@
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 2,
-          "fitness": 1099920
+          "fitness": 1099924
         }
       },
       {
-        "wallMs": 3789.8919030000006,
-        "generationsRun": 28,
+        "wallMs": 3631.353583,
+        "generationsRun": 70,
         "populationSize": 78,
         "scheduledCount": 10,
         "totalSessions": 13,
@@ -76,48 +76,48 @@
         "facultyGapScore": 0,
         "fitness": 999982,
         "baseline": {
-          "wallMs": 1.8341070000005857,
+          "wallMs": 0.7798330000000533,
           "scheduledCount": 10,
           "totalSessions": 13,
           "placementRate": 0.7692307692307693,
           "gapScore": 0,
-          "activeRoomDayCount": 5,
+          "activeRoomDayCount": 4,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 3,
-          "fitness": 999885
+          "facultyNoBreakCount": 2,
+          "fitness": 999918
         }
       },
       {
-        "wallMs": 4212.612558,
-        "generationsRun": 15,
+        "wallMs": 106.265625,
+        "generationsRun": 1,
         "populationSize": 92,
         "scheduledCount": 15,
         "totalSessions": 15,
         "placementRate": 1,
         "gapScore": 0,
-        "activeRoomDayCount": 4,
+        "activeRoomDayCount": 6,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 1,
         "facultyGapScore": 0,
-        "fitness": 1499961,
+        "fitness": 1499949,
         "baseline": {
-          "wallMs": 2.6488030000000435,
+          "wallMs": 1.2148749999996653,
           "scheduledCount": 15,
           "totalSessions": 15,
           "placementRate": 1,
           "gapScore": 0,
-          "activeRoomDayCount": 4,
+          "activeRoomDayCount": 3,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 3,
-          "fitness": 1499867
+          "facultyNoBreakCount": 2,
+          "fitness": 1499924
         }
       },
       {
-        "wallMs": 4296.798532999999,
-        "generationsRun": 19,
+        "wallMs": 4029.3862499999996,
+        "generationsRun": 47,
         "populationSize": 92,
         "scheduledCount": 9,
         "totalSessions": 15,
@@ -130,7 +130,7 @@
         "facultyGapScore": 0,
         "fitness": 899967,
         "baseline": {
-          "wallMs": 2.8545369999992545,
+          "wallMs": 0.8688339999998789,
           "scheduledCount": 9,
           "totalSessions": 15,
           "placementRate": 0.6,
@@ -138,13 +138,13 @@
           "activeRoomDayCount": 4,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 2,
-          "fitness": 899946
+          "facultyNoBreakCount": 1,
+          "fitness": 899913
         }
       },
       {
-        "wallMs": 4280.008009000001,
-        "generationsRun": 38,
+        "wallMs": 4144.613041999999,
+        "generationsRun": 91,
         "populationSize": 96,
         "scheduledCount": 7,
         "totalSessions": 16,
@@ -157,7 +157,7 @@
         "facultyGapScore": 0,
         "fitness": 699988,
         "baseline": {
-          "wallMs": 2.1315599999979895,
+          "wallMs": 0.7368329999990237,
           "scheduledCount": 7,
           "totalSessions": 16,
           "placementRate": 0.4375,
@@ -170,8 +170,8 @@
         }
       },
       {
-        "wallMs": 3828.971367000002,
-        "generationsRun": 29,
+        "wallMs": 55.18195800000103,
+        "generationsRun": 1,
         "populationSize": 78,
         "scheduledCount": 15,
         "totalSessions": 15,
@@ -180,52 +180,52 @@
         "activeRoomDayCount": 4,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 1,
+        "facultyNoBreakCount": 2,
         "facultyGapScore": 0,
-        "fitness": 1499961,
+        "fitness": 1499946,
         "baseline": {
-          "wallMs": 2.006771000000299,
+          "wallMs": 0.8118330000015703,
           "scheduledCount": 15,
           "totalSessions": 15,
           "placementRate": 1,
           "gapScore": 2,
-          "activeRoomDayCount": 5,
+          "activeRoomDayCount": 3,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 2,
-          "fitness": 1499762
+          "fitness": 1499818
         }
       },
       {
-        "wallMs": 3644.0882359999996,
-        "generationsRun": 26,
+        "wallMs": 180.26749999999993,
+        "generationsRun": 3,
         "populationSize": 74,
         "scheduledCount": 14,
         "totalSessions": 14,
         "placementRate": 1,
         "gapScore": 0,
-        "activeRoomDayCount": 2,
+        "activeRoomDayCount": 4,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 1,
         "facultyGapScore": 0,
-        "fitness": 1399973,
+        "fitness": 1399961,
         "baseline": {
-          "wallMs": 2.0157749999998487,
+          "wallMs": 0.7523329999985435,
           "scheduledCount": 14,
           "totalSessions": 14,
           "placementRate": 1,
-          "gapScore": 4,
+          "gapScore": 0,
           "activeRoomDayCount": 3,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 2,
-          "fitness": 1399872
+          "facultyNoBreakCount": 1,
+          "fitness": 1399919
         }
       },
       {
-        "wallMs": 4119.97176,
-        "generationsRun": 24,
+        "wallMs": 4030.3804579999996,
+        "generationsRun": 54,
         "populationSize": 92,
         "scheduledCount": 10,
         "totalSessions": 15,
@@ -238,7 +238,7 @@
         "facultyGapScore": 0,
         "fitness": 999967,
         "baseline": {
-          "wallMs": 1.8845849999997881,
+          "wallMs": 0.7942499999990105,
           "scheduledCount": 10,
           "totalSessions": 15,
           "placementRate": 0.6666666666666666,
@@ -247,34 +247,34 @@
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 2,
-          "fitness": 999952
+          "fitness": 999912
         }
       },
       {
-        "wallMs": 3623.0936279999987,
-        "generationsRun": 28,
+        "wallMs": 166.77845900000102,
+        "generationsRun": 3,
         "populationSize": 74,
         "scheduledCount": 16,
         "totalSessions": 16,
         "placementRate": 1,
         "gapScore": 0,
-        "activeRoomDayCount": 3,
+        "activeRoomDayCount": 6,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 0,
-        "facultyGapScore": 0,
-        "fitness": 1599982,
+        "facultyNoBreakCount": 1,
+        "facultyGapScore": 8,
+        "fitness": 1599917,
         "baseline": {
-          "wallMs": 2.2556729999996605,
+          "wallMs": 0.9264579999980924,
           "scheduledCount": 16,
           "totalSessions": 16,
           "placementRate": 1,
-          "gapScore": 2,
+          "gapScore": 0,
           "activeRoomDayCount": 3,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 1,
-          "fitness": 1599741
+          "facultyNoBreakCount": 2,
+          "fitness": 1599880
         }
       }
     ],
@@ -284,21 +284,21 @@
         "std": 0.19546090367862293
       },
       "generationsRun": {
-        "mean": 23.4,
-        "std": 9.446692542895635
+        "mean": 34.8,
+        "std": 34.850538015933125
       },
       "populationSize": 83,
       "wallMs": {
-        "mean": 3592.047356,
-        "std": 1179.5499545140372
+        "mean": 2009.341325,
+        "std": 1895.0928490960591
       },
       "gapScore": {
         "mean": 0,
         "std": 0
       },
       "activeRoomDayCount": {
-        "mean": 3.2,
-        "std": 0.8717797887081347
+        "mean": 3.9,
+        "std": 1.3
       },
       "lateLabCount": {
         "mean": 0,
@@ -309,12 +309,12 @@
         "std": 0
       },
       "facultyNoBreakCount": {
-        "mean": 0.6,
-        "std": 0.48989794855663565
+        "mean": 0.8,
+        "std": 0.6000000000000001
       },
       "fitness": {
-        "mean": 1209971.8,
-        "std": 291373.9249036537
+        "mean": 1209961.4,
+        "std": 291360.2106778481
       },
       "totalSessions": 14,
       "numRooms": 3,
@@ -326,16 +326,16 @@
           "std": 0.19546090367862293
         },
         "fitness": {
-          "mean": 1209885.4,
-          "std": 291317.17699723784
+          "mean": 1209910.8,
+          "std": 291353.36863774207
         },
         "gapScore": {
-          "mean": 0.8,
-          "std": 1.32664991614216
+          "mean": 0.2,
+          "std": 0.6000000000000001
         },
         "wallMs": {
-          "mean": 3.1976565999997617,
-          "std": 2.71791369044693
+          "mean": 1.384803999999583,
+          "std": 1.5643418581786532
         }
       }
     }
@@ -349,75 +349,75 @@
     },
     "runs": [
       {
-        "wallMs": 7563.256436000003,
-        "generationsRun": 6,
+        "wallMs": 518.645916999998,
+        "generationsRun": 1,
         "populationSize": 150,
         "scheduledCount": 37,
         "totalSessions": 37,
         "placementRate": 1,
         "gapScore": 0,
-        "activeRoomDayCount": 11,
+        "activeRoomDayCount": 9,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 3,
-        "facultyGapScore": 6,
-        "fitness": 3699865,
+        "facultyNoBreakCount": 5,
+        "facultyGapScore": 22,
+        "fitness": 3699783,
         "baseline": {
-          "wallMs": 8.285592000000179,
+          "wallMs": 3.2121659999975236,
           "scheduledCount": 37,
           "totalSessions": 37,
           "placementRate": 1,
-          "gapScore": 0,
+          "gapScore": 5,
           "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 5,
-          "fitness": 3699639
+          "fitness": 3699708
         }
       },
       {
-        "wallMs": 7566.055851999998,
-        "generationsRun": 8,
+        "wallMs": 6546.228000000003,
+        "generationsRun": 18,
         "populationSize": 150,
         "scheduledCount": 32,
         "totalSessions": 36,
         "placementRate": 0.8888888888888888,
-        "gapScore": 0,
+        "gapScore": 1,
         "activeRoomDayCount": 7,
         "lateLabCount": 0,
-        "fridayCount": 1,
-        "facultyNoBreakCount": 2,
-        "facultyGapScore": 9,
-        "fitness": 3199882,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 3,
+        "facultyGapScore": 3,
+        "fitness": 3199898,
         "baseline": {
-          "wallMs": 5.526692999999796,
+          "wallMs": 3.881082999996579,
           "scheduledCount": 32,
           "totalSessions": 36,
           "placementRate": 0.8888888888888888,
-          "gapScore": 0,
+          "gapScore": 2,
           "activeRoomDayCount": 7,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 3,
-          "fitness": 3199609
+          "fitness": 3199779
         }
       },
       {
-        "wallMs": 7438.491861999995,
-        "generationsRun": 7,
+        "wallMs": 6697.421167,
+        "generationsRun": 16,
         "populationSize": 150,
         "scheduledCount": 38,
         "totalSessions": 38,
         "placementRate": 1,
-        "gapScore": 0,
-        "activeRoomDayCount": 10,
+        "gapScore": 2,
+        "activeRoomDayCount": 9,
         "lateLabCount": 0,
-        "fridayCount": 0,
+        "fridayCount": 3,
         "facultyNoBreakCount": 5,
-        "facultyGapScore": 16,
-        "fitness": 3799801,
+        "facultyGapScore": 5,
+        "fitness": 3799815,
         "baseline": {
-          "wallMs": 9.486986000003526,
+          "wallMs": 2.6518749999995634,
           "scheduledCount": 38,
           "totalSessions": 38,
           "placementRate": 1,
@@ -425,40 +425,40 @@
           "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 4,
-          "fitness": 3799620
+          "facultyNoBreakCount": 5,
+          "fitness": 3799549
         }
       },
       {
-        "wallMs": 7451.989667000002,
-        "generationsRun": 6,
+        "wallMs": 6531.366167,
+        "generationsRun": 13,
         "populationSize": 150,
         "scheduledCount": 40,
         "totalSessions": 40,
         "placementRate": 1,
-        "gapScore": 1,
-        "activeRoomDayCount": 10,
+        "gapScore": 6,
+        "activeRoomDayCount": 9,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 5,
-        "facultyGapScore": 8,
-        "fitness": 3999830,
+        "facultyNoBreakCount": 2,
+        "facultyGapScore": 18,
+        "fitness": 3999826,
         "baseline": {
-          "wallMs": 9.972795000001497,
+          "wallMs": 3.138249999996333,
           "scheduledCount": 40,
           "totalSessions": 40,
           "placementRate": 1,
-          "gapScore": 10,
-          "activeRoomDayCount": 8,
+          "gapScore": 50,
+          "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 5,
-          "fitness": 3999611
+          "fitness": 3999441
         }
       },
       {
-        "wallMs": 7202.972018,
-        "generationsRun": 10,
+        "wallMs": 306.56979200000205,
+        "generationsRun": 1,
         "populationSize": 150,
         "scheduledCount": 37,
         "totalSessions": 37,
@@ -467,52 +467,52 @@
         "activeRoomDayCount": 10,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 4,
-        "facultyGapScore": 9,
-        "fitness": 3699844,
+        "facultyNoBreakCount": 6,
+        "facultyGapScore": 23,
+        "fitness": 3699758,
         "baseline": {
-          "wallMs": 4.1559180000040215,
+          "wallMs": 1.8359160000036354,
           "scheduledCount": 37,
           "totalSessions": 37,
           "placementRate": 1,
-          "gapScore": 24,
-          "activeRoomDayCount": 10,
+          "gapScore": 18,
+          "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 5,
-          "fitness": 3699601
+          "facultyNoBreakCount": 4,
+          "fitness": 3699592
         }
       },
       {
-        "wallMs": 8436.182334000012,
-        "generationsRun": 6,
+        "wallMs": 593.8729160000003,
+        "generationsRun": 1,
         "populationSize": 150,
         "scheduledCount": 39,
         "totalSessions": 39,
         "placementRate": 1,
         "gapScore": 0,
-        "activeRoomDayCount": 10,
+        "activeRoomDayCount": 11,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 4,
-        "facultyGapScore": 12,
-        "fitness": 3899832,
+        "facultyGapScore": 17,
+        "fitness": 3899806,
         "baseline": {
-          "wallMs": 7.7161810000106925,
+          "wallMs": 6.600250000003143,
           "scheduledCount": 39,
           "totalSessions": 39,
           "placementRate": 1,
-          "gapScore": 2,
-          "activeRoomDayCount": 12,
+          "gapScore": 6,
+          "activeRoomDayCount": 11,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 5,
-          "fitness": 3899623
+          "facultyNoBreakCount": 4,
+          "fitness": 3899596
         }
       },
       {
-        "wallMs": 7454.795452000006,
-        "generationsRun": 10,
+        "wallMs": 6518.491000000002,
+        "generationsRun": 20,
         "populationSize": 150,
         "scheduledCount": 30,
         "totalSessions": 34,
@@ -521,25 +521,25 @@
         "activeRoomDayCount": 9,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 2,
-        "facultyGapScore": 12,
-        "fitness": 2999868,
+        "facultyNoBreakCount": 3,
+        "facultyGapScore": 2,
+        "fitness": 2999893,
         "baseline": {
-          "wallMs": 4.478979000006802,
+          "wallMs": 2.1326659999976982,
           "scheduledCount": 30,
           "totalSessions": 34,
           "placementRate": 0.8823529411764706,
-          "gapScore": 2,
-          "activeRoomDayCount": 8,
+          "gapScore": 12,
+          "activeRoomDayCount": 6,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 5,
-          "fitness": 2999715
+          "fitness": 2999637
         }
       },
       {
-        "wallMs": 7858.945245999988,
-        "generationsRun": 6,
+        "wallMs": 547.7768329999963,
+        "generationsRun": 1,
         "populationSize": 150,
         "scheduledCount": 35,
         "totalSessions": 35,
@@ -549,73 +549,73 @@
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 3,
-        "facultyGapScore": 27,
-        "fitness": 3499805,
+        "facultyGapScore": 12,
+        "fitness": 3499865,
         "baseline": {
-          "wallMs": 8.685779999999795,
+          "wallMs": 3.835584000000381,
           "scheduledCount": 35,
           "totalSessions": 35,
           "placementRate": 1,
-          "gapScore": 5,
+          "gapScore": 0,
           "activeRoomDayCount": 7,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 4,
-          "fitness": 3499699
+          "facultyNoBreakCount": 5,
+          "fitness": 3499635
         }
       },
       {
-        "wallMs": 7396.028435,
-        "generationsRun": 8,
+        "wallMs": 6534.714417000003,
+        "generationsRun": 17,
         "populationSize": 150,
         "scheduledCount": 37,
         "totalSessions": 43,
         "placementRate": 0.8604651162790697,
-        "gapScore": 2,
-        "activeRoomDayCount": 7,
+        "gapScore": 0,
+        "activeRoomDayCount": 11,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 3,
-        "facultyGapScore": 16,
-        "fitness": 3699843,
+        "facultyNoBreakCount": 2,
+        "facultyGapScore": 18,
+        "fitness": 3699832,
         "baseline": {
-          "wallMs": 8.471074000000954,
+          "wallMs": 2.6563330000062706,
           "scheduledCount": 37,
           "totalSessions": 43,
           "placementRate": 0.8604651162790697,
-          "gapScore": 1,
-          "activeRoomDayCount": 7,
+          "gapScore": 2,
+          "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 4,
-          "fitness": 3699595
+          "fitness": 3699704
         }
       },
       {
-        "wallMs": 7674.801932000002,
-        "generationsRun": 6,
+        "wallMs": 1570.2841249999983,
+        "generationsRun": 3,
         "populationSize": 150,
         "scheduledCount": 34,
         "totalSessions": 34,
         "placementRate": 1,
-        "gapScore": 2,
-        "activeRoomDayCount": 9,
+        "gapScore": 0,
+        "activeRoomDayCount": 8,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 4,
-        "facultyGapScore": 10,
-        "fitness": 3399840,
+        "facultyGapScore": 22,
+        "fitness": 3399804,
         "baseline": {
-          "wallMs": 7.8912989999953425,
+          "wallMs": 3.425083000001905,
           "scheduledCount": 34,
           "totalSessions": 34,
           "placementRate": 1,
           "gapScore": 6,
-          "activeRoomDayCount": 8,
+          "activeRoomDayCount": 9,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 5,
-          "fitness": 3399667
+          "fitness": 3399737
         }
       }
     ],
@@ -625,37 +625,37 @@
         "std": 0.056650256751484974
       },
       "generationsRun": {
-        "mean": 7.3,
-        "std": 1.5524174696260025
+        "mean": 9.1,
+        "std": 7.892401408950257
       },
       "populationSize": 150,
       "wallMs": {
-        "mean": 7604.3519234000005,
-        "std": 322.8736104656326
+        "mean": 3636.5370334,
+        "std": 2946.1502364352104
       },
       "gapScore": {
-        "mean": 0.5,
-        "std": 0.806225774829855
+        "mean": 0.9,
+        "std": 1.8138357147217055
       },
       "activeRoomDayCount": {
         "mean": 9,
-        "std": 1.4142135623730951
+        "std": 1.3416407864998738
       },
       "lateLabCount": {
         "mean": 0,
         "std": 0
       },
       "fridayCount": {
-        "mean": 0.1,
-        "std": 0.30000000000000004
+        "mean": 0.3,
+        "std": 0.9
       },
       "facultyNoBreakCount": {
-        "mean": 3.5,
-        "std": 1.02469507659596
+        "mean": 3.7,
+        "std": 1.268857754044952
       },
       "fitness": {
-        "mean": 3589841,
-        "std": 298147.2800644004
+        "mean": 3589828,
+        "std": 298131.8531569547
       },
       "totalSessions": 37,
       "numRooms": 5,
@@ -667,16 +667,16 @@
           "std": 0.056650256751484974
         },
         "fitness": {
-          "mean": 3589637.9,
-          "std": 298136.44457343686
+          "mean": 3589637.8,
+          "std": 298102.17200778663
         },
         "gapScore": {
-          "mean": 5.6,
-          "std": 6.843975452907468
+          "mean": 10.7,
+          "std": 14.014635207525023
         },
         "wallMs": {
-          "mean": 7.4671297000022605,
-          "std": 1.934463222081889
+          "mean": 3.3369206000003033,
+          "std": 1.2606599029666439
         }
       }
     }
@@ -690,273 +690,273 @@
     },
     "runs": [
       {
-        "wallMs": 9274.258671000003,
-        "generationsRun": 4,
+        "wallMs": 7683.247208000001,
+        "generationsRun": 8,
         "populationSize": 150,
         "scheduledCount": 60,
         "totalSessions": 61,
         "placementRate": 0.9836065573770492,
-        "gapScore": 3,
+        "gapScore": 2,
         "activeRoomDayCount": 12,
         "lateLabCount": 0,
-        "fridayCount": 2,
-        "facultyNoBreakCount": 7,
-        "facultyGapScore": 41,
-        "fitness": 5999630,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 4,
+        "facultyGapScore": 62,
+        "fitness": 5999614,
         "baseline": {
-          "wallMs": 13.860142000004998,
+          "wallMs": 10.150792000000365,
           "scheduledCount": 60,
           "totalSessions": 61,
           "placementRate": 0.9836065573770492,
-          "gapScore": 15,
-          "activeRoomDayCount": 10,
+          "gapScore": 6,
+          "activeRoomDayCount": 12,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 6,
-          "fitness": 5999333
+          "facultyNoBreakCount": 5,
+          "fitness": 5999399
         }
       },
       {
-        "wallMs": 11911.992419999995,
-        "generationsRun": 4,
+        "wallMs": 8077.1365000000005,
+        "generationsRun": 7,
         "populationSize": 150,
         "scheduledCount": 60,
         "totalSessions": 60,
         "placementRate": 1,
-        "gapScore": 8,
-        "activeRoomDayCount": 12,
+        "gapScore": 3,
+        "activeRoomDayCount": 14,
         "lateLabCount": 0,
-        "fridayCount": 1,
-        "facultyNoBreakCount": 6,
-        "facultyGapScore": 26,
-        "fitness": 5999700,
+        "fridayCount": 2,
+        "facultyNoBreakCount": 4,
+        "facultyGapScore": 28,
+        "fitness": 5999715,
         "baseline": {
-          "wallMs": 21.549654999995255,
+          "wallMs": 8.386375000001863,
           "scheduledCount": 60,
           "totalSessions": 60,
           "placementRate": 1,
-          "gapScore": 7,
-          "activeRoomDayCount": 14,
+          "gapScore": 3,
+          "activeRoomDayCount": 12,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 10,
-          "fitness": 5999569
+          "facultyNoBreakCount": 5,
+          "fitness": 5999484
         }
       },
       {
-        "wallMs": 10632.400351999997,
-        "generationsRun": 3,
+        "wallMs": 8523.103749999995,
+        "generationsRun": 6,
         "populationSize": 150,
         "scheduledCount": 60,
         "totalSessions": 60,
         "placementRate": 1,
-        "gapScore": 5,
-        "activeRoomDayCount": 13,
+        "gapScore": 4,
+        "activeRoomDayCount": 11,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 5,
-        "facultyGapScore": 59,
-        "fitness": 5999596,
+        "facultyNoBreakCount": 7,
+        "facultyGapScore": 35,
+        "fitness": 5999677,
         "baseline": {
-          "wallMs": 28.55835800000932,
+          "wallMs": 9.09749999998894,
           "scheduledCount": 60,
           "totalSessions": 60,
           "placementRate": 1,
-          "gapScore": 33,
+          "gapScore": 5,
           "activeRoomDayCount": 11,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 5,
-          "fitness": 5999156
+          "fitness": 5999492
         }
       },
       {
-        "wallMs": 8920.539470999996,
-        "generationsRun": 4,
+        "wallMs": 7078.901417000001,
+        "generationsRun": 8,
         "populationSize": 150,
         "scheduledCount": 54,
         "totalSessions": 55,
         "placementRate": 0.9818181818181818,
-        "gapScore": 5,
-        "activeRoomDayCount": 12,
+        "gapScore": 4,
+        "activeRoomDayCount": 11,
         "lateLabCount": 0,
         "fridayCount": 1,
         "facultyNoBreakCount": 4,
-        "facultyGapScore": 47,
-        "fitness": 5399655,
+        "facultyGapScore": 44,
+        "fitness": 5399676,
         "baseline": {
-          "wallMs": 12.825398999993922,
+          "wallMs": 6.360291999997571,
           "scheduledCount": 54,
           "totalSessions": 55,
           "placementRate": 0.9818181818181818,
-          "gapScore": 6,
-          "activeRoomDayCount": 11,
+          "gapScore": 5,
+          "activeRoomDayCount": 10,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 6,
-          "fitness": 5399294
+          "fitness": 5399631
         }
       },
       {
-        "wallMs": 9568.499848000007,
-        "generationsRun": 3,
+        "wallMs": 7891.369584,
+        "generationsRun": 6,
         "populationSize": 150,
         "scheduledCount": 57,
         "totalSessions": 57,
         "placementRate": 1,
-        "gapScore": 9,
+        "gapScore": 2,
         "activeRoomDayCount": 14,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 5,
+        "facultyNoBreakCount": 8,
         "facultyGapScore": 36,
-        "fitness": 5699670,
+        "fitness": 5699646,
         "baseline": {
-          "wallMs": 31.758609000011347,
+          "wallMs": 9.152707999994163,
           "scheduledCount": 57,
           "totalSessions": 57,
           "placementRate": 1,
-          "gapScore": 36,
+          "gapScore": 3,
           "activeRoomDayCount": 13,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 7,
-          "fitness": 5699265
+          "fitness": 5699416
         }
       },
       {
-        "wallMs": 10678.166392000014,
-        "generationsRun": 4,
+        "wallMs": 7462.871792000005,
+        "generationsRun": 7,
         "populationSize": 150,
         "scheduledCount": 56,
         "totalSessions": 56,
         "placementRate": 1,
-        "gapScore": 5,
-        "activeRoomDayCount": 11,
+        "gapScore": 4,
+        "activeRoomDayCount": 10,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 6,
-        "facultyGapScore": 32,
-        "fitness": 5599701,
+        "facultyGapScore": 35,
+        "fitness": 5599698,
         "baseline": {
-          "wallMs": 18.42268899999908,
+          "wallMs": 7.515457999994396,
           "scheduledCount": 56,
           "totalSessions": 56,
-          "placementRate": 1,
-          "gapScore": 2,
-          "activeRoomDayCount": 9,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 5,
-          "fitness": 5599509
-        }
-      },
-      {
-        "wallMs": 11805.951079999999,
-        "generationsRun": 4,
-        "populationSize": 150,
-        "scheduledCount": 59,
-        "totalSessions": 59,
-        "placementRate": 1,
-        "gapScore": 3,
-        "activeRoomDayCount": 14,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 7,
-        "facultyGapScore": 49,
-        "fitness": 5899606,
-        "baseline": {
-          "wallMs": 18.686152000009315,
-          "scheduledCount": 59,
-          "totalSessions": 59,
-          "placementRate": 1,
-          "gapScore": 6,
-          "activeRoomDayCount": 13,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 9,
-          "fitness": 5899417
-        }
-      },
-      {
-        "wallMs": 11666.139450999995,
-        "generationsRun": 4,
-        "populationSize": 150,
-        "scheduledCount": 62,
-        "totalSessions": 62,
-        "placementRate": 1,
-        "gapScore": 5,
-        "activeRoomDayCount": 13,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 7,
-        "facultyGapScore": 43,
-        "fitness": 6199630,
-        "baseline": {
-          "wallMs": 22.68829900000128,
-          "scheduledCount": 62,
-          "totalSessions": 62,
           "placementRate": 1,
           "gapScore": 13,
           "activeRoomDayCount": 12,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 7,
-          "fitness": 6199256
+          "fitness": 5599320
         }
       },
       {
-        "wallMs": 8937.788048999995,
-        "generationsRun": 5,
-        "populationSize": 150,
-        "scheduledCount": 63,
-        "totalSessions": 64,
-        "placementRate": 0.984375,
-        "gapScore": 4,
-        "activeRoomDayCount": 16,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 7,
-        "facultyGapScore": 56,
-        "fitness": 6299563,
-        "baseline": {
-          "wallMs": 13.768018000002485,
-          "scheduledCount": 63,
-          "totalSessions": 64,
-          "placementRate": 0.984375,
-          "gapScore": 2,
-          "activeRoomDayCount": 11,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 5,
-          "fitness": 6299233
-        }
-      },
-      {
-        "wallMs": 10193.230232000002,
-        "generationsRun": 4,
+        "wallMs": 8272.461292000007,
+        "generationsRun": 7,
         "populationSize": 150,
         "scheduledCount": 59,
         "totalSessions": 59,
         "placementRate": 1,
-        "gapScore": 3,
-        "activeRoomDayCount": 14,
+        "gapScore": 5,
+        "activeRoomDayCount": 16,
         "lateLabCount": 0,
         "fridayCount": 0,
-        "facultyNoBreakCount": 8,
-        "facultyGapScore": 25,
-        "fitness": 5899687,
+        "facultyNoBreakCount": 7,
+        "facultyGapScore": 27,
+        "fitness": 5899676,
         "baseline": {
-          "wallMs": 13.764383000001544,
+          "wallMs": 7.67866600000707,
           "scheduledCount": 59,
           "totalSessions": 59,
           "placementRate": 1,
-          "gapScore": 2,
+          "gapScore": 0,
+          "activeRoomDayCount": 12,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 8,
+          "fitness": 5899524
+        }
+      },
+      {
+        "wallMs": 1150.593292000005,
+        "generationsRun": 1,
+        "populationSize": 150,
+        "scheduledCount": 62,
+        "totalSessions": 62,
+        "placementRate": 1,
+        "gapScore": 0,
+        "activeRoomDayCount": 13,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 5,
+        "facultyGapScore": 67,
+        "fitness": 6199579,
+        "baseline": {
+          "wallMs": 9.079457999992883,
+          "scheduledCount": 62,
+          "totalSessions": 62,
+          "placementRate": 1,
+          "gapScore": 16,
+          "activeRoomDayCount": 12,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 7,
+          "fitness": 6199299
+        }
+      },
+      {
+        "wallMs": 7283.804999999993,
+        "generationsRun": 10,
+        "populationSize": 150,
+        "scheduledCount": 63,
+        "totalSessions": 64,
+        "placementRate": 0.984375,
+        "gapScore": 0,
+        "activeRoomDayCount": 16,
+        "lateLabCount": 0,
+        "fridayCount": 1,
+        "facultyNoBreakCount": 7,
+        "facultyGapScore": 49,
+        "fitness": 6299593,
+        "baseline": {
+          "wallMs": 4.568041999998968,
+          "scheduledCount": 63,
+          "totalSessions": 64,
+          "placementRate": 0.984375,
+          "gapScore": 5,
           "activeRoomDayCount": 12,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 6,
-          "fitness": 5899416
+          "fitness": 6299291
+        }
+      },
+      {
+        "wallMs": 7293.487624999994,
+        "generationsRun": 7,
+        "populationSize": 150,
+        "scheduledCount": 59,
+        "totalSessions": 59,
+        "placementRate": 1,
+        "gapScore": 4,
+        "activeRoomDayCount": 14,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 5,
+        "facultyGapScore": 41,
+        "fitness": 5899665,
+        "baseline": {
+          "wallMs": 8.141959000000497,
+          "scheduledCount": 59,
+          "totalSessions": 59,
+          "placementRate": 1,
+          "gapScore": 12,
+          "activeRoomDayCount": 13,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 5,
+          "fitness": 5899407
         }
       }
     ],
@@ -966,21 +966,21 @@
         "std": 0.007690627282231228
       },
       "generationsRun": {
-        "mean": 3.9,
-        "std": 0.5385164807134504
+        "mean": 6.7,
+        "std": 2.193171219946131
       },
       "populationSize": 150,
       "wallMs": {
-        "mean": 10358.8965966,
-        "std": 1109.4470343588398
+        "mean": 7071.697746,
+        "std": 2022.6690647835183
       },
       "gapScore": {
-        "mean": 5,
-        "std": 1.9493588689617927
+        "mean": 2.8,
+        "std": 1.661324772583615
       },
       "activeRoomDayCount": {
         "mean": 13.1,
-        "std": 1.374772708486752
+        "std": 1.972308292331602
       },
       "lateLabCount": {
         "mean": 0,
@@ -991,12 +991,12 @@
         "std": 0.66332495807108
       },
       "facultyNoBreakCount": {
-        "mean": 6.2,
-        "std": 1.1661903789690602
+        "mean": 5.7,
+        "std": 1.4177446878757827
       },
       "fitness": {
-        "mean": 5899643.8,
-        "std": 256879.35295223712
+        "mean": 5899653.9,
+        "std": 256879.31374186205
       },
       "totalSessions": 61,
       "numRooms": 8,
@@ -1008,16 +1008,16 @@
           "std": 0.007690627282231228
         },
         "fitness": {
-          "mean": 5899344.8,
-          "std": 256874.7462534221
+          "mean": 5899426.3,
+          "std": 256845.849903809
         },
         "gapScore": {
-          "mean": 12.2,
-          "std": 11.931470990619724
+          "mean": 6.8,
+          "std": 4.853864439804639
         },
         "wallMs": {
-          "mean": 19.588170400002856,
-          "std": 6.249400807723158
+          "mean": 8.013124999997672,
+          "std": 1.526339007385404
         }
       }
     }
@@ -1031,273 +1031,273 @@
     },
     "runs": [
       {
-        "wallMs": 16334.55282099999,
-        "generationsRun": 3,
+        "wallMs": 8428.650958999991,
+        "generationsRun": 4,
         "populationSize": 150,
         "scheduledCount": 71,
         "totalSessions": 78,
         "placementRate": 0.9102564102564102,
-        "gapScore": 3,
-        "activeRoomDayCount": 17,
+        "gapScore": 6,
+        "activeRoomDayCount": 20,
         "lateLabCount": 0,
         "fridayCount": 1,
-        "facultyNoBreakCount": 6,
-        "facultyGapScore": 60,
-        "fitness": 7099549,
+        "facultyNoBreakCount": 7,
+        "facultyGapScore": 39,
+        "fitness": 7099591,
         "baseline": {
-          "wallMs": 36.29084599998896,
+          "wallMs": 13.803040999991936,
           "scheduledCount": 71,
           "totalSessions": 78,
           "placementRate": 0.9102564102564102,
-          "gapScore": 5,
-          "activeRoomDayCount": 15,
+          "gapScore": 2,
+          "activeRoomDayCount": 17,
           "lateLabCount": 0,
           "fridayCount": 0,
-          "facultyNoBreakCount": 6,
-          "fitness": 7099489
+          "facultyNoBreakCount": 9,
+          "fitness": 7099213
         }
       },
       {
-        "wallMs": 12583.000066999986,
-        "generationsRun": 2,
+        "wallMs": 9869.413249999983,
+        "generationsRun": 4,
         "populationSize": 150,
         "scheduledCount": 86,
         "totalSessions": 86,
+        "placementRate": 1,
+        "gapScore": 9,
+        "activeRoomDayCount": 17,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 8,
+        "facultyGapScore": 80,
+        "fitness": 8599431,
+        "baseline": {
+          "wallMs": 16.852249999996275,
+          "scheduledCount": 86,
+          "totalSessions": 86,
+          "placementRate": 1,
+          "gapScore": 26,
+          "activeRoomDayCount": 18,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 11,
+          "fitness": 8599173
+        }
+      },
+      {
+        "wallMs": 9462.640290999989,
+        "generationsRun": 4,
+        "populationSize": 150,
+        "scheduledCount": 80,
+        "totalSessions": 80,
+        "placementRate": 1,
+        "gapScore": 15,
+        "activeRoomDayCount": 18,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 8,
+        "facultyGapScore": 58,
+        "fitness": 7999495,
+        "baseline": {
+          "wallMs": 26.879625000001397,
+          "scheduledCount": 80,
+          "totalSessions": 80,
+          "placementRate": 1,
+          "gapScore": 3,
+          "activeRoomDayCount": 17,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 10,
+          "fitness": 7999327
+        }
+      },
+      {
+        "wallMs": 8844.182792000007,
+        "generationsRun": 5,
+        "populationSize": 150,
+        "scheduledCount": 91,
+        "totalSessions": 91,
+        "placementRate": 1,
+        "gapScore": 15,
+        "activeRoomDayCount": 18,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 11,
+        "facultyGapScore": 57,
+        "fitness": 9099454,
+        "baseline": {
+          "wallMs": 19.324416999996174,
+          "scheduledCount": 91,
+          "totalSessions": 91,
+          "placementRate": 1,
+          "gapScore": 39,
+          "activeRoomDayCount": 17,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 8,
+          "fitness": 9099065
+        }
+      },
+      {
+        "wallMs": 8418.177416999999,
+        "generationsRun": 4,
+        "populationSize": 150,
+        "scheduledCount": 85,
+        "totalSessions": 85,
+        "placementRate": 1,
+        "gapScore": 10,
+        "activeRoomDayCount": 18,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 9,
+        "facultyGapScore": 74,
+        "fitness": 8499431,
+        "baseline": {
+          "wallMs": 23.381290999997873,
+          "scheduledCount": 85,
+          "totalSessions": 85,
+          "placementRate": 1,
+          "gapScore": 13,
+          "activeRoomDayCount": 15,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 10,
+          "fitness": 8499353
+        }
+      },
+      {
+        "wallMs": 9660.770542000013,
+        "generationsRun": 4,
+        "populationSize": 150,
+        "scheduledCount": 81,
+        "totalSessions": 81,
+        "placementRate": 1,
+        "gapScore": 21,
+        "activeRoomDayCount": 19,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 9,
+        "facultyGapScore": 56,
+        "fitness": 8099464,
+        "baseline": {
+          "wallMs": 16.68558300001314,
+          "scheduledCount": 81,
+          "totalSessions": 81,
+          "placementRate": 1,
+          "gapScore": 12,
+          "activeRoomDayCount": 16,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 9,
+          "fitness": 8099037
+        }
+      },
+      {
+        "wallMs": 9649.095208999992,
+        "generationsRun": 5,
+        "populationSize": 150,
+        "scheduledCount": 83,
+        "totalSessions": 83,
+        "placementRate": 1,
+        "gapScore": 13,
+        "activeRoomDayCount": 15,
+        "lateLabCount": 0,
+        "fridayCount": 1,
+        "facultyNoBreakCount": 5,
+        "facultyGapScore": 84,
+        "fitness": 8299450,
+        "baseline": {
+          "wallMs": 13.209915999992518,
+          "scheduledCount": 83,
+          "totalSessions": 83,
+          "placementRate": 1,
+          "gapScore": 24,
+          "activeRoomDayCount": 14,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 9,
+          "fitness": 8298985
+        }
+      },
+      {
+        "wallMs": 8097.501166000002,
+        "generationsRun": 4,
+        "populationSize": 150,
+        "scheduledCount": 83,
+        "totalSessions": 86,
+        "placementRate": 0.9651162790697675,
+        "gapScore": 17,
+        "activeRoomDayCount": 16,
+        "lateLabCount": 0,
+        "fridayCount": 0,
+        "facultyNoBreakCount": 9,
+        "facultyGapScore": 68,
+        "fitness": 8299446,
+        "baseline": {
+          "wallMs": 23.020292000001064,
+          "scheduledCount": 83,
+          "totalSessions": 86,
+          "placementRate": 0.9651162790697675,
+          "gapScore": 8,
+          "activeRoomDayCount": 17,
+          "lateLabCount": 0,
+          "fridayCount": 0,
+          "facultyNoBreakCount": 7,
+          "fitness": 8299333
+        }
+      },
+      {
+        "wallMs": 10568.421499999997,
+        "generationsRun": 4,
+        "populationSize": 150,
+        "scheduledCount": 84,
+        "totalSessions": 84,
         "placementRate": 1,
         "gapScore": 3,
         "activeRoomDayCount": 19,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 8,
-        "facultyGapScore": 92,
-        "fitness": 8599389,
+        "facultyGapScore": 93,
+        "fitness": 8399385,
         "baseline": {
-          "wallMs": 40.0714539999899,
-          "scheduledCount": 86,
-          "totalSessions": 86,
+          "wallMs": 28.95966700001736,
+          "scheduledCount": 84,
+          "totalSessions": 84,
           "placementRate": 1,
-          "gapScore": 33,
-          "activeRoomDayCount": 16,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 7,
-          "fitness": 8599044
-        }
-      },
-      {
-        "wallMs": 17790.989770999964,
-        "generationsRun": 3,
-        "populationSize": 150,
-        "scheduledCount": 80,
-        "totalSessions": 80,
-        "placementRate": 1,
-        "gapScore": 9,
-        "activeRoomDayCount": 18,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 9,
-        "facultyGapScore": 58,
-        "fitness": 7999498,
-        "baseline": {
-          "wallMs": 39.81964299999527,
-          "scheduledCount": 80,
-          "totalSessions": 80,
-          "placementRate": 1,
-          "gapScore": 10,
-          "activeRoomDayCount": 17,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 9,
-          "fitness": 7999213
-        }
-      },
-      {
-        "wallMs": 12893.096248999995,
-        "generationsRun": 3,
-        "populationSize": 150,
-        "scheduledCount": 91,
-        "totalSessions": 91,
-        "placementRate": 1,
-        "gapScore": 18,
-        "activeRoomDayCount": 20,
-        "lateLabCount": 0,
-        "fridayCount": 1,
-        "facultyNoBreakCount": 7,
-        "facultyGapScore": 77,
-        "fitness": 9099403,
-        "baseline": {
-          "wallMs": 71.78727999998955,
-          "scheduledCount": 91,
-          "totalSessions": 91,
-          "placementRate": 1,
-          "gapScore": 12,
+          "gapScore": 16,
           "activeRoomDayCount": 17,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 8,
-          "fitness": 9099042
+          "fitness": 8398822
         }
       },
       {
-        "wallMs": 16488.886193000013,
-        "generationsRun": 3,
+        "wallMs": 9619.968250000005,
+        "generationsRun": 5,
         "populationSize": 150,
-        "scheduledCount": 85,
-        "totalSessions": 85,
-        "placementRate": 1,
-        "gapScore": 2,
-        "activeRoomDayCount": 18,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 11,
-        "facultyGapScore": 77,
-        "fitness": 8499413,
-        "baseline": {
-          "wallMs": 36.820945999992546,
-          "scheduledCount": 85,
-          "totalSessions": 85,
-          "placementRate": 1,
-          "gapScore": 2,
-          "activeRoomDayCount": 15,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 7,
-          "fitness": 8499195
-        }
-      },
-      {
-        "wallMs": 12290.716527000011,
-        "generationsRun": 2,
-        "populationSize": 150,
-        "scheduledCount": 81,
-        "totalSessions": 81,
-        "placementRate": 1,
-        "gapScore": 9,
-        "activeRoomDayCount": 15,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 8,
-        "facultyGapScore": 84,
-        "fitness": 8099427,
-        "baseline": {
-          "wallMs": 54.79371800000081,
-          "scheduledCount": 81,
-          "totalSessions": 81,
-          "placementRate": 1,
-          "gapScore": 3,
-          "activeRoomDayCount": 15,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 7,
-          "fitness": 8099164
-        }
-      },
-      {
-        "wallMs": 15441.458969999978,
-        "generationsRun": 3,
-        "populationSize": 150,
-        "scheduledCount": 83,
-        "totalSessions": 83,
+        "scheduledCount": 80,
+        "totalSessions": 80,
         "placementRate": 1,
         "gapScore": 6,
         "activeRoomDayCount": 17,
         "lateLabCount": 0,
         "fridayCount": 0,
         "facultyNoBreakCount": 9,
-        "facultyGapScore": 65,
-        "fitness": 8299485,
+        "facultyGapScore": 63,
+        "fitness": 7999493,
         "baseline": {
-          "wallMs": 33.139306999975815,
-          "scheduledCount": 83,
-          "totalSessions": 83,
-          "placementRate": 1,
-          "gapScore": 28,
-          "activeRoomDayCount": 14,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 8,
-          "fitness": 8299120
-        }
-      },
-      {
-        "wallMs": 15179.623680000019,
-        "generationsRun": 3,
-        "populationSize": 150,
-        "scheduledCount": 83,
-        "totalSessions": 86,
-        "placementRate": 0.9651162790697675,
-        "gapScore": 11,
-        "activeRoomDayCount": 17,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 10,
-        "facultyGapScore": 56,
-        "fitness": 8299491,
-        "baseline": {
-          "wallMs": 35.50193800003035,
-          "scheduledCount": 83,
-          "totalSessions": 86,
-          "placementRate": 0.9651162790697675,
-          "gapScore": 11,
-          "activeRoomDayCount": 16,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 8,
-          "fitness": 8299339
-        }
-      },
-      {
-        "wallMs": 13154.605952000013,
-        "generationsRun": 2,
-        "populationSize": 150,
-        "scheduledCount": 84,
-        "totalSessions": 84,
-        "placementRate": 1,
-        "gapScore": 9,
-        "activeRoomDayCount": 19,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 11,
-        "facultyGapScore": 78,
-        "fitness": 8399382,
-        "baseline": {
-          "wallMs": 45.285292999993544,
-          "scheduledCount": 84,
-          "totalSessions": 84,
-          "placementRate": 1,
-          "gapScore": 7,
-          "activeRoomDayCount": 18,
-          "lateLabCount": 0,
-          "fridayCount": 0,
-          "facultyNoBreakCount": 10,
-          "fitness": 8399181
-        }
-      },
-      {
-        "wallMs": 15009.458339000004,
-        "generationsRun": 3,
-        "populationSize": 150,
-        "scheduledCount": 80,
-        "totalSessions": 80,
-        "placementRate": 1,
-        "gapScore": 5,
-        "activeRoomDayCount": 20,
-        "lateLabCount": 0,
-        "fridayCount": 0,
-        "facultyNoBreakCount": 5,
-        "facultyGapScore": 64,
-        "fitness": 7999534,
-        "baseline": {
-          "wallMs": 34.482729999988806,
+          "wallMs": 21.4735829999845,
           "scheduledCount": 80,
           "totalSessions": 80,
           "placementRate": 1,
-          "gapScore": 4,
+          "gapScore": 9,
           "activeRoomDayCount": 16,
           "lateLabCount": 0,
           "fridayCount": 0,
           "facultyNoBreakCount": 10,
-          "fitness": 7999042
+          "fitness": 7999195
         }
       }
     ],
@@ -1307,21 +1307,21 @@
         "std": 0.027780549363583776
       },
       "generationsRun": {
-        "mean": 2.7,
+        "mean": 4.3,
         "std": 0.45825756949558405
       },
       "populationSize": 150,
       "wallMs": {
-        "mean": 14716.638856899997,
-        "std": 1795.5046707188924
+        "mean": 9261.882137599998,
+        "std": 740.9508905997334
       },
       "gapScore": {
-        "mean": 7.5,
-        "std": 4.5661800227323495
+        "mean": 11.5,
+        "std": 5.371219600798314
       },
       "activeRoomDayCount": {
-        "mean": 18,
-        "std": 1.4832396974191326
+        "mean": 17.7,
+        "std": 1.4177446878757827
       },
       "lateLabCount": {
         "mean": 0,
@@ -1332,12 +1332,12 @@
         "std": 0.4000000000000001
       },
       "facultyNoBreakCount": {
-        "mean": 8.4,
-        "std": 1.9078784028338913
+        "mean": 8.3,
+        "std": 1.4866068747318506
       },
       "fitness": {
-        "mean": 8239457.1,
-        "std": 490261.231795346
+        "mean": 8239464,
+        "std": 490264.66596829105
       },
       "totalSessions": 78,
       "numRooms": 10,
@@ -1349,16 +1349,16 @@
           "std": 0.027780549363583776
         },
         "fitness": {
-          "mean": 8239182.9,
-          "std": 490207.6358475967
+          "mean": 8239150.3,
+          "std": 490270.82590667164
         },
         "gapScore": {
-          "mean": 11.5,
-          "std": 10.092076099594175
+          "mean": 15.2,
+          "std": 10.906878563548785
         },
         "wallMs": {
-          "mean": 42.799315499994556,
-          "std": 11.40395410361454
+          "mean": 20.358966499999223,
+          "std": 5.04876902757064
         }
       }
     }

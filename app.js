@@ -3450,13 +3450,19 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
   // Let the modal actually paint before the (mostly synchronous, per-generation) GA work begins.
   await nextTick();
 
+  // Measured separately from the tracking beacon's own round-trip latency_ms field (which
+  // times the /api/track POST itself, not this) -- this is the optimizer's actual algorithmic
+  // wall-clock time, reported below as optimizerWallMs so field usage-log records can speak to
+  // real-world compute time, not just placement outcomes.
+  const optimizeStart = performance.now();
   let result = await optimizeSchedule(updateGaModal);
+  const optimizerWallMs = Math.round((performance.now() - optimizeStart) * 10) / 10;
 
   btn.disabled = false; btn.textContent = "⚡ Optimize Scheduling";
   if(!result){
     closeGaModal();
     status.textContent = "Nothing to schedule.";
-    trackEvent("optimize", { eventType:"optimize_complete", numRooms: state.rooms.length, extra:{ result:"nothing_to_schedule" } });
+    trackEvent("optimize", { eventType:"optimize_complete", numRooms: state.rooms.length, extra:{ result:"nothing_to_schedule", optimizerWallMs } });
     return;
   }
   result = validateAndSplitConflicts(result);
@@ -3473,7 +3479,7 @@ document.getElementById("optimize-btn").addEventListener("click", async ()=>{
     generations: result.generationsRun,
     populationSize: result.populationSize,
     numRooms: state.rooms.length,
-    extra: { scheduledCount: result.assignments.length, unscheduledCount: result.unscheduled.length, totalSessions: total, numSubjects: state.subjects.length, numFaculty: state.faculty.length }
+    extra: { scheduledCount: result.assignments.length, unscheduledCount: result.unscheduled.length, totalSessions: total, numSubjects: state.subjects.length, numFaculty: state.faculty.length, optimizerWallMs }
   });
 });
 

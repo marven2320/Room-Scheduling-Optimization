@@ -5,7 +5,7 @@ const { generateProblem } = require("./generate.js");
 
 async function main() {
   const problem = generateProblem("Medium-trace", { numRooms: 5, numSubjects: 25, numFaculty: 6, seed: 777 });
-  core.setState({ rooms: problem.rooms, subjects: problem.subjects, faculty: problem.faculty, prospectus: [], targetTerm: "", blocks: 1, schedule: null });
+  core.setState({ rooms: problem.rooms, subjects: problem.subjects, faculty: problem.faculty, prospectus: [], targetTerm: "", blocksByProgram: {}, defaultBlocks: 1, fixedSchedule: [], schedule: null });
   const trace = [];
   const result = await core.optimizeSchedule((p) => {
     trace.push({ generation: p.generation, fitness: p.fitness, scheduledCount: p.scheduledCount, totalSessions: p.totalSessions, gapScore: p.gapScore, done: p.done });
