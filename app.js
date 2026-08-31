@@ -335,7 +335,7 @@ function populateDurationSelect(){
 // Builds a subject record without touching state/saving/rendering — used both by the
 // single-subject Add form and by the bulk auto-populate-from-prospectus flow (which pushes
 // many records in one pass, then saves/renders once at the end).
-function buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment){
+function buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment, level){
   const idx = state.subjects.length;
   return {
     id: genId("subj"),
@@ -352,14 +352,17 @@ function buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitP
     // External Assignment: room & faculty are handled by another college/department
     // (e.g. NSTP, PE) — the optimizer places only the class hours (TBA room, TBD faculty)
     // and skips room/faculty conflict-checking for this subject entirely.
-    externalAssignment: !!externalAssignment
+    externalAssignment: !!externalAssignment,
+    // Program Level: which flat per-subject teaching-load-unit value it counts as toward a
+    // faculty member's load (see taskTeachingUnits) — "UG" (6 units) or "GRAD" (4.5 units).
+    level: level==="GRAD" ? "GRAD" : "UG"
   };
 }
-function addSubject(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment){
-  state.subjects.push(buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment));
+function addSubject(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment, level){
+  state.subjects.push(buildSubjectRecord(name, durationSlots, sessionsPerWeek, size, isSplitPair, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment, level));
   saveState();
   renderSubjects();
-  trackEvent("addSubject", { extra:{ type, externalAssignment: !!externalAssignment } });
+  trackEvent("addSubject", { extra:{ type, externalAssignment: !!externalAssignment, level: level==="GRAD"?"GRAD":"UG" } });
 }
 function toggleSubjectExternal(id){
   const s = state.subjects.find(x=>x.id===id);
@@ -378,6 +381,24 @@ function deleteSubject(id){
   renderSubjects();
   renderFaculty();
   trackEvent("deleteSubject");
+}
+
+// Flat per-subject teaching-load-unit value a faculty member is credited once they're listed
+// as handling this subject — used both for the Faculty tab's load summary and as a soft
+// preference in the optimizer (see runTrial's faculty load tracking). A Laboratory subject
+// whose session runs 3 hours or longer is always 2.55 units regardless of level; anything
+// else is a flat 6 units for an Undergraduate subject or 4.5 for a Graduate one.
+function subjectTeachingUnits(subject){
+  const durationMin = (subject.durationSlots||0) * SLOT_LEN;
+  if(subject.type==="LAB" && durationMin>=180) return 2.55;
+  return subject.level==="GRAD" ? 4.5 : 6;
+}
+// Same computation from a GA task object (buildTasks copies durationSlots/subjectType/level
+// onto every task so runTrial never needs to look the subject record back up mid-decode).
+function taskTeachingUnits(task){
+  const durationMin = (task.durationSlots||0) * SLOT_LEN;
+  if(task.subjectType==="LAB" && durationMin>=180) return 2.55;
+  return task.level==="GRAD" ? 4.5 : 6;
 }
 
 function renderSubjects(){
@@ -407,11 +428,13 @@ function renderSubjects(){
     const externalTag = s.externalAssignment
       ? ` &nbsp;•&nbsp; <span class="tag-external">🏢 External (TBA/TBD)</span>`
       : "";
+    const levelTag = s.level==="GRAD" ? ` &nbsp;•&nbsp; <span class="tag-lab">GRAD</span>` : "";
+    const unitsTag = ` &nbsp;•&nbsp; <span style="color:var(--text-dim);font-size:12px;" title="Teaching-load units this subject counts toward a faculty member's total when they're listed as handling it">${subjectTeachingUnits(s)}u load</span>`;
     return `<div class="card" data-id="${s.id}">
       <div class="swatch" style="background:${s.color}"></div>
       <div class="info">
         <div class="name">${escapeHtml(s.name)} ${typeTag}</div>
-        <div class="meta">${scheduleMeta}${s.size ? " &nbsp;•&nbsp; ~"+s.size+" students" : ""}${prospectusTag}${externalTag}</div>
+        <div class="meta">${scheduleMeta}${s.size ? " &nbsp;•&nbsp; ~"+s.size+" students" : ""}${prospectusTag}${externalTag}${levelTag}${unitsTag}</div>
       </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" data-action="toggle-external" data-id="${s.id}">${s.externalAssignment ? "Unmark External" : "Mark External"}</button>
@@ -455,26 +478,67 @@ function findFacultyByName(name){
 }
 // Adding a faculty member whose name already exists doesn't create a second entry — the
 // newly-picked subjects are merged (deduplicated) into the existing faculty's handled-subject
-// list instead, so re-adding the same name is how you extend what they teach.
-function addFaculty(name, subjectIds){
+// list instead, so re-adding the same name is how you extend what they teach. Admin/Research
+// Load Units is simply overwritten with whatever's submitted (defaulting to 0) — re-adding a
+// name is also how you update that value.
+function addFaculty(name, subjectIds, adminResearchUnits){
+  const units = (typeof adminResearchUnits==="number" && adminResearchUnits>=0) ? adminResearchUnits : 0;
   const existing = findFacultyByName(name);
   if(existing){
     const merged = new Set(existing.subjectIds);
     (subjectIds||[]).forEach(id=> merged.add(id));
     existing.subjectIds = Array.from(merged);
+    existing.adminResearchUnits = units;
     saveState();
     renderFaculty();
-    trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:true } });
+    trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:true, adminResearchUnits: units } });
     return;
   }
   state.faculty.push({
     id: genId("fac"),
     name: name,
-    subjectIds: subjectIds || []
+    subjectIds: subjectIds || [],
+    // Admin/Research Load Units: the non-teaching portion of a faculty member's total load.
+    // Policy (enforced/advised in the Faculty tab and the optimizer, never a hard block):
+    // total load should be at least 18 units, max PAYABLE 24 (going over is allowed but "not
+    // advisable"); if admin/research alone already exceeds 18, at least one teaching subject
+    // is required on top of it.
+    adminResearchUnits: units
   });
   saveState();
   renderFaculty();
-  trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:false } });
+  trackEvent("addFaculty", { extra:{ subjectCount: (subjectIds||[]).length, merged:false, adminResearchUnits: units } });
+}
+// Computes a faculty member's current load picture from their handled-subject list — teaching
+// units (subjectTeachingUnits summed once per subject), admin/research (their own stored
+// value), the total, and a status describing where that total sits against policy.
+function facultyLoadSummary(faculty){
+  const subjectById = {};
+  state.subjects.forEach(s=> subjectById[s.id]=s);
+  let teachingUnits = 0;
+  faculty.subjectIds.forEach(sid=>{
+    const s = subjectById[sid];
+    if(s) teachingUnits += subjectTeachingUnits(s);
+  });
+  teachingUnits = Math.round(teachingUnits*100)/100;
+  const adminResearchUnits = faculty.adminResearchUnits || 0;
+  const total = Math.round((teachingUnits + adminResearchUnits)*100)/100;
+  const needsTeachingLoad = adminResearchUnits > 18 && teachingUnits <= 0;
+  let status, statusClass;
+  if(needsTeachingLoad){
+    status = "Needs at least 1 teaching-load subject (admin/research is over 18 units)";
+    statusClass = "tag-none";
+  } else if(total < 18){
+    status = "Underloaded — below the 18-unit minimum";
+    statusClass = "tag-external";
+  } else if(total > 24){
+    status = "Over the 24-unit payable maximum — allowed, but not advisable";
+    statusClass = "tag-external";
+  } else {
+    status = "Within policy (18–24 units)";
+    statusClass = "tag-lec";
+  }
+  return { teachingUnits, adminResearchUnits, total, status, statusClass, needsTeachingLoad };
 }
 function deleteFaculty(id){
   if(!confirm("Delete this faculty member? This cannot be undone.")) return;
@@ -505,10 +569,12 @@ function renderFacultyDetail(){
   const sel = document.getElementById("faculty-list-select");
   const detail = document.getElementById("faculty-detail-subjects");
   const delBtn = document.getElementById("delete-faculty-btn");
+  const loadEl = document.getElementById("faculty-detail-load");
   if(!sel || !detail || !delBtn) return;
   const f = state.faculty.find(x=>x.id===sel.value);
   if(!f){
     detail.innerHTML = `<span style="color:var(--text-dim);font-size:12px;">Highlight a faculty member to see their subjects.</span>`;
+    if(loadEl) loadEl.innerHTML = "";
     delBtn.disabled = true;
     return;
   }
@@ -521,6 +587,16 @@ function renderFacultyDetail(){
         return s ? `<span class="faculty-subject-chip">${escapeHtml(subjectCodeLabel(s))}</span>` : "";
       }).join("")
     : `<span style="color:var(--text-dim);font-size:12px;">No subjects listed yet — won't be conflict-checked</span>`;
+  if(loadEl){
+    const load = facultyLoadSummary(f);
+    loadEl.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
+        <div><span style="color:var(--text-dim);font-size:11px;text-transform:uppercase;">Teaching</span><br><b>${load.teachingUnits}u</b></div>
+        <div><span style="color:var(--text-dim);font-size:11px;text-transform:uppercase;">Admin/Research</span><br><b>${load.adminResearchUnits}u</b></div>
+        <div><span style="color:var(--text-dim);font-size:11px;text-transform:uppercase;">Total</span><br><b>${load.total}u</b></div>
+      </div>
+      <span class="${load.statusClass}">${escapeHtml(load.status)}</span>`;
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -1067,7 +1143,8 @@ function buildTasks(blocks){
           type: "paired",
           subjectId:s.id, subjectName, durationSlots:s.durationSlots, subjectType: s.type,
           size:s.size, color:s.color, dayPairPref:s.dayPairPref, blockIndex:b,
-          sortWeight: s.durationSlots*2, facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday
+          sortWeight: s.durationSlots*2, facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday,
+          level: s.level==="GRAD" ? "GRAD" : "UG" // Faculty Load Units: which flat per-subject value this task counts toward a faculty member's total (see taskTeachingUnits)
         });
       } else {
         // Lab subjects split for room capacity produce 2 identical full-length sessions
@@ -1079,7 +1156,8 @@ function buildTasks(blocks){
             type:"single", subjectId:s.id, subjectName, durationSlots:s.durationSlots,
             size:s.size, color:s.color, sessionIndex:i, sortWeight:s.durationSlots, blockIndex:b,
             subjectType: s.type, labSection: s.isCapacitySplit ? (i+1) : null, instanceKey,
-            facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday
+            facultyIds, isCohort, cohortGroup, externalAssignment, allowSunday,
+            level: s.level==="GRAD" ? "GRAD" : "UG"
           });
         }
       }
@@ -1100,7 +1178,13 @@ function shuffle(arr){
 // Among facultyIds, returns one at random who is free across all `days` for
 // [start, start+durationSlots) — or null if none of them are free (meaning this
 // slot can't be taught by anyone qualified and must be rejected as a candidate).
-function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
+// `loadCtx` (optional — omitted entirely by the diagnostics-only callers, which just need a
+// yes/no on time-feasibility) softly prefers whichever free, qualified faculty member would
+// stay within their remaining teaching-load capacity (24 units minus their Admin/Research
+// Load Units) if picked for this subject — never a hard filter, since going over 24 is
+// allowed ("not advisable") rather than forbidden, so an over-cap faculty member is still
+// used when they're the only one free.
+function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots, loadCtx){
   const freeOnes = facultyIds.filter(fid=>{
     return days.every(day=>{
       const arr = facultyOcc[fid][day];
@@ -1109,6 +1193,15 @@ function pickFreeFaculty(facultyIds, facultyOcc, days, start, durationSlots){
     });
   });
   if(freeOnes.length===0) return null;
+  if(loadCtx){
+    const within = freeOnes.filter(fid=>{
+      const already = loadCtx.credited.has(fid+"|"+loadCtx.subjectId);
+      const projected = (loadCtx.units[fid]||0) + (already ? 0 : loadCtx.unitValue);
+      const max = loadCtx.maxUnits[fid];
+      return max==null || projected <= max;
+    });
+    if(within.length>0) return within[Math.floor(Math.random()*within.length)];
+  }
   return freeOnes[Math.floor(Math.random()*freeOnes.length)];
 }
 
@@ -1119,7 +1212,7 @@ function roomAllowsType(room, subjectType){
   return rt==="BOTH" || rt===subjectType;
 }
 
-function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType){
+function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType, loadCtx){
   if(usedDaysForSubject.has(day)) return [];
   if(!roomAllowsType(room, subjectType)) return [];
   if(size && room.capacity && room.capacity < size) return [];
@@ -1139,7 +1232,7 @@ function findCandidates(room, day, durationSlots, occ, size, usedDaysForSubject,
     if(!ok) continue;
     let facultyId = null;
     if(facultyIds && facultyIds.length){
-      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [day], start, durationSlots);
+      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [day], start, durationSlots, loadCtx);
       if(!facultyId) continue; // no qualified faculty free at this room/time — not a valid slot
     }
     let adj = 0;
@@ -1188,7 +1281,7 @@ function findScheduleOnlyPairedCandidates(pairKey, durationSlots, isCohort, coho
 // Finds (start-slot) candidates in `room` for a paired subject on a specific day-pair,
 // requiring BOTH days to be free/available at the same start slot (same time, same room),
 // AND a qualified faculty member free on both days at that same time.
-function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType){
+function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyIds, facultyOcc, isCohort, cohortOcc, subjectType, loadCtx){
   if(!roomAllowsType(room, subjectType)) return [];
   if(size && room.capacity && room.capacity < size) return [];
   // Same shared-room budget check as findCandidates, but a paired session books durationSlots
@@ -1208,7 +1301,7 @@ function findPairedCandidates(room, pairKey, durationSlots, occ, size, facultyId
     if(!ok) continue;
     let facultyId = null;
     if(facultyIds && facultyIds.length){
-      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [d1,d2], start, durationSlots);
+      facultyId = pickFreeFaculty(facultyIds, facultyOcc, [d1,d2], start, durationSlots, loadCtx);
       if(!facultyId) continue;
     }
     let adj = 0;
@@ -1507,6 +1600,27 @@ function runTrial(tasksOrder){
   // rooms already in use (maximize room utilization / minimize half-empty rooms).
   function roomLoad(roomId){ return computeRoomLoad(occ, roomId); }
 
+  // Faculty Load Units — a soft preference, not a hard constraint (going over 24 is allowed,
+  // just "not advisable"). facultyMaxUnits is fixed for the whole trial (admin/research load
+  // doesn't change mid-decode); facultyTeachingUnits/facultyCredited accumulate as tasks get
+  // assigned, crediting a faculty member once per distinct SUBJECT they end up teaching (a
+  // subject's unit value describes the course itself, not each individual session/meeting).
+  const facultyMaxUnits = {};
+  state.faculty.forEach(f=> facultyMaxUnits[f.id] = Math.max(0, 24 - (f.adminResearchUnits||0)));
+  const facultyTeachingUnits = {};
+  const facultyCredited = new Set();
+  function loadCtxFor(task){
+    if(!task.facultyIds || !task.facultyIds.length) return null;
+    return { subjectId: task.subjectId, unitValue: taskTeachingUnits(task), units: facultyTeachingUnits, credited: facultyCredited, maxUnits: facultyMaxUnits };
+  }
+  function creditFacultyLoad(fid, task){
+    if(!fid) return;
+    const key = fid+"|"+task.subjectId;
+    if(facultyCredited.has(key)) return;
+    facultyCredited.add(key);
+    facultyTeachingUnits[fid] = (facultyTeachingUnits[fid]||0) + taskTeachingUnits(task);
+  }
+
   tasksOrder.forEach(task=>{
     if(task.type === "paired"){
       if(task.externalAssignment){
@@ -1555,7 +1669,7 @@ function runTrial(tasksOrder){
       let allCandidates = [];
       state.rooms.forEach(room=>{
         pairKeys.forEach(pk=>{
-          allCandidates = allCandidates.concat(findPairedCandidates(room, pk, task.durationSlots, occ, task.size, task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType));
+          allCandidates = allCandidates.concat(findPairedCandidates(room, pk, task.durationSlots, occ, task.size, task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType, loadCtxFor(task)));
         });
       });
 
@@ -1596,6 +1710,7 @@ function runTrial(tasksOrder){
           groupOcc[pick.day2][pick.start+k] = true;
         }
       }
+      creditFacultyLoad(pick.facultyId, task);
       const room = state.rooms.find(r=>r.id===pick.roomId);
       const faculty = pick.facultyId ? state.faculty.find(f=>f.id===pick.facultyId) : null;
       const pairLabel = DAY_PAIR_LABELS[pick.pairKey];
@@ -1655,7 +1770,7 @@ function runTrial(tasksOrder){
     let allCandidates = [];
     state.rooms.forEach(room=>{
       candidateDaysFor(task).forEach(day=>{
-        const cands = findCandidates(room, day, task.durationSlots, occ, task.size, usedDays[task.instanceKey], task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType);
+        const cands = findCandidates(room, day, task.durationSlots, occ, task.size, usedDays[task.instanceKey], task.facultyIds, facultyOcc, task.isCohort, groupOcc, task.subjectType, loadCtxFor(task));
         allCandidates = allCandidates.concat(cands);
       });
     });
@@ -1698,6 +1813,7 @@ function runTrial(tasksOrder){
       if(pick.facultyId) facultyOcc[pick.facultyId][pick.day][pick.start+k] = true;
       if(groupOcc) groupOcc[pick.day][pick.start+k] = true;
     }
+    creditFacultyLoad(pick.facultyId, task);
     usedDays[task.instanceKey].add(pick.day);
     const room = state.rooms.find(r=>r.id===pick.roomId);
     const faculty = pick.facultyId ? state.faculty.find(f=>f.id===pick.facultyId) : null;
@@ -2416,8 +2532,10 @@ document.getElementById("add-subject-btn").addEventListener("click", ()=>{
   const prospectusCourseId = prospectusSelect.value || null;
   const externalToggleEl = document.getElementById("subj-external-toggle");
   const externalAssignment = externalToggleEl.checked;
+  const levelSelect = document.getElementById("subj-level");
+  const level = levelSelect && levelSelect.value==="GRAD" ? "GRAD" : "UG";
 
-  addSubject(name, durationSlots, sessions, size, isSplit, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment);
+  addSubject(name, durationSlots, sessions, size, isSplit, dayPairPref, type, isCapacitySplit, prospectusCourseId, externalAssignment, level);
 
   nameInput.value=""; sizeInput.value="";
   splitToggleEl.checked = false;
@@ -2426,6 +2544,7 @@ document.getElementById("add-subject-btn").addEventListener("click", ()=>{
   sessionsInputEl.value = "1";
   prospectusSelect.value = "";
   externalToggleEl.checked = false;
+  if(levelSelect) levelSelect.value = "UG";
   refreshSplitUI();
   nameInput.focus();
 });
@@ -2441,10 +2560,17 @@ document.getElementById("add-faculty-btn").addEventListener("click", ()=>{
   const nameInput = document.getElementById("faculty-name");
   const name = nameInput.value.trim();
   if(!name){ alert("Please enter a faculty name."); nameInput.focus(); return; }
+  const adminUnitsInput = document.getElementById("faculty-admin-units");
+  let adminResearchUnits = 0;
+  if(adminUnitsInput && adminUnitsInput.value.trim()){
+    adminResearchUnits = parseFloat(adminUnitsInput.value);
+    if(isNaN(adminResearchUnits) || adminResearchUnits<0){ alert("Admin/Research Load Units must be zero or a positive number."); adminUnitsInput.focus(); return; }
+  }
   const subjectsSelect = document.getElementById("faculty-subjects");
   const subjectIds = Array.from(subjectsSelect.selectedOptions).map(o=>o.value);
-  addFaculty(name, subjectIds);
+  addFaculty(name, subjectIds, adminResearchUnits);
   nameInput.value = "";
+  if(adminUnitsInput) adminUnitsInput.value = "0";
   Array.from(subjectsSelect.options).forEach(o=> o.selected = false);
   nameInput.focus();
 });
@@ -3163,22 +3289,23 @@ function importRoomsFromRows(dataRows){
 /* --- Subjects --- */
 function exportSubjectsCsv(){
   if(state.subjects.length===0){ alert("No subjects to export yet."); return; }
-  const rows = [["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"]];
+  const rows = [["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment","Level"]];
   state.subjects.forEach(s=> rows.push([
     s.name, s.type, s.durationSlots*SLOT_LEN, s.sessionsPerWeek, s.size||"",
     s.isSplitPair ? "TRUE" : "FALSE", s.dayPairPref||"", s.isCapacitySplit ? "TRUE" : "FALSE",
-    s.externalAssignment ? "TRUE" : "FALSE"
+    s.externalAssignment ? "TRUE" : "FALSE", s.level==="GRAD" ? "GRAD" : "UG"
   ]));
   downloadCsv("subjects.csv", rows);
   trackEvent("exportSubjectsCsv");
 }
 function downloadSubjectsTemplate(){
   downloadCsv("subjects-template.csv", [
-    ["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment"],
-    ["MATH101","LEC","60","3","35","FALSE","","",""],
-    ["CHEM011L","LAB","180","2","35","FALSE","","TRUE",""],
-    ["BIO101","LEC","180","2","30","TRUE","AUTO","FALSE",""],
-    ["PE1","LEC","120","1","","FALSE","","","TRUE"]
+    ["Code","Type","DurationMinutes","SessionsPerWeek","ClassSize","SplitPaired","DayPairPref","CapacitySplit","ExternalAssignment","Level"],
+    ["MATH101","LEC","60","3","35","FALSE","","","","UG"],
+    ["CHEM011L","LAB","180","2","35","FALSE","","TRUE","","UG"],
+    ["BIO101","LEC","180","2","30","TRUE","AUTO","FALSE","","UG"],
+    ["PE1","LEC","120","1","","FALSE","","","TRUE","UG"],
+    ["GRAD501","LEC","90","2","20","FALSE","","","","GRAD"]
   ]);
 }
 function importSubjectsFromRows(dataRows){
@@ -3200,6 +3327,7 @@ function importSubjectsFromRows(dataRows){
     const dayPairPref = dayPairMap[(cols[6]||"AUTO").trim().toUpperCase()] || "AUTO";
     const wantsCapacitySplit = (cols[7]||"").trim().toUpperCase()==="TRUE";
     const externalAssignment = (cols[8]||"").trim().toUpperCase()==="TRUE";
+    const level = (cols[9]||"").trim().toUpperCase()==="GRAD" ? "GRAD" : "UG";
 
     // Mirror the Add Subject form's own invariants so imported rows behave exactly like
     // hand-added ones (split modes force their own duration/session values).
@@ -3213,7 +3341,7 @@ function importSubjectsFromRows(dataRows){
 
     state.subjects.push(buildSubjectRecord(
       name, finalDurationSlots, finalSessions, size,
-      finalIsSplit, finalDayPairPref, type, finalIsCapacitySplit, null, externalAssignment
+      finalIsSplit, finalDayPairPref, type, finalIsCapacitySplit, null, externalAssignment, level
     ));
     added++;
   });
@@ -3228,18 +3356,19 @@ function exportFacultyCsv(){
   if(state.faculty.length===0){ alert("No faculty to export yet."); return; }
   const subjectById = {};
   state.subjects.forEach(s=> subjectById[s.id] = s);
-  const rows = [["Name","SubjectCodes"]];
+  const rows = [["Name","SubjectCodes","AdminResearchUnits"]];
   state.faculty.forEach(f=> rows.push([
-    f.name, f.subjectIds.map(id=> subjectById[id] ? subjectCodeLabel(subjectById[id]) : null).filter(Boolean).join("; ")
+    f.name, f.subjectIds.map(id=> subjectById[id] ? subjectCodeLabel(subjectById[id]) : null).filter(Boolean).join("; "),
+    f.adminResearchUnits || 0
   ]));
   downloadCsv("faculty.csv", rows);
   trackEvent("exportFacultyCsv");
 }
 function downloadFacultyTemplate(){
   downloadCsv("faculty-template.csv", [
-    ["Name","SubjectCodes"],
-    ["Engr. Dela Cruz","MATH101; CHEM011L"],
-    ["Engr. Santos","CHEM011L"]
+    ["Name","SubjectCodes","AdminResearchUnits"],
+    ["Engr. Dela Cruz","MATH101; CHEM011L","6"],
+    ["Engr. Santos","CHEM011L","0"]
   ]);
 }
 function importFacultyFromRows(dataRows){
@@ -3256,17 +3385,20 @@ function importFacultyFromRows(dataRows){
       if(match.externalAssignment){ externalSkipped++; return; }
       subjectIds.push(match.id);
     });
+    const adminRaw = parseFloat(cols[2]);
+    const adminResearchUnits = !isNaN(adminRaw) && adminRaw>=0 ? adminRaw : 0;
     // A row whose name matches an existing (or already-imported-this-run) faculty member
     // merges its subjects into that record instead of creating a duplicate — same rule as
-    // adding one by hand.
+    // adding one by hand. Admin/Research Load Units is overwritten with this row's value.
     const existing = findFacultyByName(name);
     if(existing){
       const set = new Set(existing.subjectIds);
       subjectIds.forEach(id=> set.add(id));
       existing.subjectIds = Array.from(set);
+      existing.adminResearchUnits = adminResearchUnits;
       merged++;
     } else {
-      state.faculty.push({ id: genId("fac"), name, subjectIds });
+      state.faculty.push({ id: genId("fac"), name, subjectIds, adminResearchUnits });
       added++;
     }
   });
@@ -3292,7 +3424,7 @@ document.getElementById("subjects-import-file").addEventListener("change", (e)=>
   const file = e.target.files[0];
   if(file) handleCsvImport(file, importSubjectsFromRows, (r)=>
     `Imported ${r.added} subject(s).${r.skipped ? ` Skipped ${r.skipped} row(s) with an invalid/missing duration.` : ""}`
-  );
+  , "code");
   e.target.value = "";
 });
 

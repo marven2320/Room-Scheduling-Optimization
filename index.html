@@ -100,6 +100,13 @@
           </select>
         </div>
         <div class="field">
+          <label>Program Level</label>
+          <select id="subj-level" style="min-width:130px;" title="Determines this subject's flat teaching-load-unit value for faculty loading (6 units Undergraduate, 4.5 Graduate) — a 3-hour+ Laboratory session is always 2.55 regardless of level.">
+            <option value="UG" selected>Undergraduate</option>
+            <option value="GRAD">Graduate</option>
+          </select>
+        </div>
+        <div class="field">
           <label>Session Duration</label>
           <select id="subj-duration"></select>
         </div>
@@ -164,11 +171,15 @@
   <section id="tab-faculty" class="tab-content">
     <div class="panel no-print">
       <h2>Add Faculty</h2>
-      <p class="sub">List each faculty member's previously handled subjects. The optimizer will only assign a subject session to a faculty member listed here for it, and will never double-book a faculty member into two overlapping sessions — even across different rooms. One or more faculty can be listed for the same subject; leave a subject with no faculty listed to schedule it without a faculty-conflict check.</p>
+      <p class="sub">List each faculty member's previously handled subjects. The optimizer will only assign a subject session to a faculty member listed here for it, and will never double-book a faculty member into two overlapping sessions — even across different rooms. One or more faculty can be listed for the same subject; leave a subject with no faculty listed to schedule it without a faculty-conflict check. <b>Admin/Research Load Units</b> is the non-teaching portion of their load: policy is a total (admin/research + teaching) of at least 18 units, up to a payable maximum of 24 — going over 24 is allowed but not advisable, and if admin/research alone exceeds 18, at least one teaching subject is required. The optimizer softly prefers keeping faculty within their remaining teaching capacity when more than one qualified faculty member is available, without ever hard-blocking a valid assignment.</p>
       <div class="form-row" id="faculty-form">
         <div class="field">
           <label>Faculty Name</label>
           <input type="text" id="faculty-name" placeholder="e.g. Engr. Dela Cruz" style="min-width:200px;">
+        </div>
+        <div class="field">
+          <label>Admin/Research Load Units</label>
+          <input type="number" id="faculty-admin-units" placeholder="0" min="0" step="0.5" value="0" style="width:110px;">
         </div>
         <div class="field">
           <label>Previous Subjects Handled</label>
@@ -190,6 +201,8 @@
       <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
         <select id="faculty-list-select" size="10" style="flex:1; min-width:220px;"></select>
         <div style="flex:2; min-width:220px;">
+          <div class="sub" style="margin:0 0 6px;">Load</div>
+          <div id="faculty-detail-load" style="margin-bottom:14px;"></div>
           <div class="sub" style="margin:0 0 6px;">Subjects handled (codes)</div>
           <div id="faculty-detail-subjects" class="meta"><span style="color:var(--text-dim);font-size:12px;">Highlight a faculty member to see their subjects.</span></div>
           <button class="btn btn-sm btn-danger" id="delete-faculty-btn" style="margin-top:12px;" disabled>Delete Selected</button>
@@ -482,6 +495,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
