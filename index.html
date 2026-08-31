@@ -20,10 +20,11 @@
 </header>
 
 <nav class="tabs">
-  <button class="tab-btn active" data-tab="rooms">Rooms <span class="tab-badge" id="badge-rooms">0</span></button>
+  <button class="tab-btn active" data-tab="prospectus">Prospectus <span class="tab-badge" id="badge-prospectus">0</span></button>
   <button class="tab-btn" data-tab="subjects">Subjects <span class="tab-badge" id="badge-subjects">0</span></button>
+  <button class="tab-btn" data-tab="rooms">Rooms <span class="tab-badge" id="badge-rooms">0</span></button>
   <button class="tab-btn" data-tab="faculty">Faculty <span class="tab-badge" id="badge-faculty">0</span></button>
-  <button class="tab-btn" data-tab="prospectus">Prospectus <span class="tab-badge" id="badge-prospectus">0</span></button>
+  <button class="tab-btn" data-tab="fixed">Fixed Schedule <span class="tab-badge" id="badge-fixed">0</span></button>
   <button class="tab-btn" data-tab="schedule">Optimize Schedule</button>
   <button class="tab-btn" data-tab="guide">📘 Guide</button>
   <button class="tab-btn" data-tab="usage">📊 App Usage Summary</button>
@@ -32,7 +33,7 @@
 <main>
 
   <!-- ROOMS TAB -->
-  <section id="tab-rooms" class="tab-content active">
+  <section id="tab-rooms" class="tab-content">
     <div class="panel no-print">
       <h2>Add a Room</h2>
       <p class="sub">Default availability is every day, 7:30 AM – 9:00 PM. Narrow the open/close times below to override the default for this room (rooms can't open earlier than 7:30 AM or stay open later than 9:00 PM) — or leave them as-is and fine-tune specific days/times afterward with "Edit Availability". <b>Room Type</b> is a hard scheduling constraint — a <b>LEC Only</b> room is never offered to a Laboratory subject and a <b>LAB Only</b> room is never offered to a Lecture subject; leave it at <b>Both</b> for a room that can host either. For rooms shared with other departments, set <b>Allowable Usage %</b> below 100% to cap how much of the room's open time this app's optimizer is allowed to claim.</p>
@@ -65,13 +66,13 @@
           <label>Allowable Usage % (shared rooms)</label>
           <input type="number" id="room-usage-percent" placeholder="100" min="1" max="100" value="100" style="width:110px;">
         </div>
-        <button class="btn btn-primary" id="add-room-btn">+ Add Room</button>
+        <button class="btn btn-primary" id="add-room-btn" disabled>+ Add Room</button>
       </div>
     </div>
 
     <div class="panel">
       <h2>Rooms</h2>
-      <p class="sub">Click "Edit Availability" to block off days/times a room can't be used.</p>
+      <p class="sub">Click "Edit Availability" to block off days/times a room can't be used. Click <b>Priority Subjects</b> to manually pick which subjects should be preferred for a given room (e.g. a specialized lab kept for its equipment-matched subjects) — a soft preference: the optimizer still uses another suitable room if this one is unavailable or full.</p>
       <div class="io-toolbar">
         <button class="btn btn-sm btn-ghost" id="rooms-export-btn">⬇ Export CSV</button>
         <button class="btn btn-sm btn-ghost" id="rooms-template-btn">📄 Download Template</button>
@@ -86,7 +87,7 @@
   <section id="tab-subjects" class="tab-content">
     <div class="panel no-print">
       <h2>Add a Subject</h2>
-      <p class="sub">Set how long each class session runs and how many sessions per week it needs. Each session is scheduled on a different day. 3-hour <b>Lecture</b> subjects can optionally be split into two 1.5-hour sessions on paired days (Mon+Wed, Tue+Thu, or Fri+Sat), meeting at the same time on both days. <b>Laboratory</b> subjects can optionally be split into 2 identical sections when one room can't fit the whole class — each section keeps the full session length and is scheduled independently. Linking a subject to a <b>Prospectus Course</b> (uploaded in the Prospectus tab) lets the optimizer keep it conflict-free against the other required courses in the same <b>program &amp; year level</b> for regular students — different programs are scheduled together but never block each other. Subjects handled by another college/department can be marked <b>External Assignment</b> — the optimizer will only place their class hours (room shows as TBA, faculty as TBD) while still avoiding conflicts for regular students. Need multiple identical sections of every subject at once? Use <b>Number of Blocks</b> on the Optimize Schedule tab instead.</p>
+      <p class="sub">Set how long each class session runs and how many sessions per week it needs. Each session is scheduled on a different day. 3-hour <b>Lecture</b> subjects can optionally be split into two 1.5-hour sessions on paired days (Mon+Wed, Tue+Thu, or Fri+Sat), meeting at the same time on both days. <b>Laboratory</b> subjects can optionally be split into 2 identical sections when one room can't fit the whole class — each section keeps the full session length and is scheduled independently. Linking a subject to a <b>Prospectus Course</b> (uploaded in the Prospectus tab) lets the optimizer keep it conflict-free against the other required courses in the same <b>program &amp; year level</b> for regular students — different programs are scheduled together but never block each other. Subjects handled by another college/department can be marked <b>External Assignment</b> — the optimizer will only place their class hours (room shows as TBA, faculty as TBD) while still avoiding conflicts for regular students. Need multiple identical sections of a program's subjects at once? Set that program's <b>Number of Blocks</b> on the Optimize Schedule tab instead.</p>
       <div class="form-row" id="subject-form">
         <div class="field">
           <label>Code</label>
@@ -151,7 +152,7 @@
             <input type="checkbox" id="subj-external-toggle" style="width:15px;height:15px;"> External Assignment (room TBA, faculty TBD)
           </label>
         </div>
-        <button class="btn btn-primary" id="add-subject-btn">+ Add Subject</button>
+        <button class="btn btn-primary" id="add-subject-btn" disabled>+ Add Subject</button>
       </div>
     </div>
 
@@ -185,7 +186,7 @@
           <label>Previous Subjects Handled</label>
           <select id="faculty-subjects" multiple size="5"></select>
         </div>
-        <button class="btn btn-primary" id="add-faculty-btn">+ Add Faculty</button>
+        <button class="btn btn-primary" id="add-faculty-btn" disabled>+ Add Faculty</button>
       </div>
     </div>
 
@@ -212,14 +213,15 @@
   </section>
 
   <!-- PROSPECTUS TAB -->
-  <section id="tab-prospectus" class="tab-content">
+  <section id="tab-prospectus" class="tab-content active">
     <div class="panel no-print">
       <h2>Upload Program Prospectus</h2>
-      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other. Pick a Target Semester on the Schedule tab to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import.</p>
+      <p class="sub">Upload one or more degree programs' prospectuses (curricula) so the optimizer can schedule them all together while keeping <b>regular students</b> conflict-free: every required course in the same program &amp; year level is treated as something one student takes at some point, so none of them are ever scheduled to overlap — different programs (and different year levels) never block each other, and each uploaded program gets its own block below. Pick a Target Semester below to auto-load every uploaded program's courses for that term as subjects. CSV import is the reliable option; PDF upload is best-effort (parses common "Year, Term" tabular prospectus layouts) and always shows a review step before anything is saved — always check it over. No file to upload? Use <b>Add a Course Manually</b> below instead. Courses already in your prospectus (same Program + Year + Term + Code) are automatically skipped as duplicates on re-import or re-entry.</p>
       <div class="field" style="margin-bottom:12px;">
         <label>Program Name</label>
         <input type="text" id="prospectus-program-input" list="prospectus-program-list" placeholder="e.g. BS Electrical Engineering" style="min-width:280px;">
         <datalist id="prospectus-program-list"></datalist>
+        <div style="color:var(--text-dim);font-size:12px;margin-top:4px;">Type this <b>before</b> importing — required for PDF upload, and for any CSV that doesn't already have its own <b>Program</b> column (e.g. an older prospectus file) — every course gets tagged with it.</div>
       </div>
       <div class="io-toolbar">
         <button class="btn btn-sm btn-ghost" id="prospectus-export-btn">⬇ Export CSV</button>
@@ -231,6 +233,49 @@
         <button class="btn btn-sm btn-danger" id="prospectus-clear-btn">Clear All</button>
       </div>
       <div id="prospectus-pdf-status" style="color:var(--text-dim);font-size:13px;"></div>
+      <div class="field" style="margin-top:12px;">
+        <label>Target Semester (loads every program's subjects &amp; avoids conflicts per program/year level)</label>
+        <select id="target-term-select" style="min-width:280px;">
+          <option value="">— none (no curriculum-conflict check) —</option>
+        </select>
+        <div id="target-term-hint" style="color:var(--text-dim);font-size:12px;margin-top:4px;"></div>
+      </div>
+    </div>
+
+    <div class="panel no-print">
+      <h2>Add a Course Manually</h2>
+      <p class="sub">Add one course at a time to the <b>Program Name</b> above — no CSV/PDF needed. Use this to enter a course by hand, or to add a few extra courses to an already-uploaded program (click "+ Add Course" on that program's block below to jump here with its name filled in). The same Program + Year + Term + Code duplicate check as CSV import applies, so re-adding an existing course is safely skipped.</p>
+      <div class="form-row" id="prospectus-manual-form">
+        <div class="field">
+          <label>Year Level</label>
+          <select id="prospectus-manual-year" style="min-width:130px;"></select>
+        </div>
+        <div class="field">
+          <label>Term</label>
+          <select id="prospectus-manual-term" style="min-width:160px;"></select>
+        </div>
+        <div class="field">
+          <label>Course Code</label>
+          <input type="text" id="prospectus-manual-code" placeholder="e.g. MAT060" style="min-width:140px;">
+        </div>
+        <div class="field">
+          <label>Course Title</label>
+          <input type="text" id="prospectus-manual-title" placeholder="e.g. Calculus with Analytical Geometry 1" style="min-width:260px;">
+        </div>
+        <div class="field">
+          <label>Units</label>
+          <input type="number" id="prospectus-manual-units" placeholder="e.g. 4" min="0" step="0.5" style="width:90px;">
+        </div>
+        <div class="field">
+          <label>Lec Hrs/Week</label>
+          <input type="number" id="prospectus-manual-lec" placeholder="e.g. 4" min="0" style="width:110px;">
+        </div>
+        <div class="field">
+          <label>Lab Hrs/Week</label>
+          <input type="number" id="prospectus-manual-lab" placeholder="e.g. 0" min="0" style="width:110px;">
+        </div>
+        <button class="btn btn-primary" id="prospectus-manual-add-btn" disabled>+ Add Course</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -239,27 +284,45 @@
     </div>
   </section>
 
+  <!-- FIXED SCHEDULE TAB -->
+  <section id="tab-fixed" class="tab-content">
+    <div class="panel no-print">
+      <h2>Import a Fixed Schedule</h2>
+      <p class="sub">Sessions already decided ahead of time — imported here, they're treated as <b>hard constraints</b> the optimizer must respect: their room/day/time is locked in before anything new is placed, so nothing new can double-book that room, and (when Faculty and/or Program + Year Level are given) they also block faculty and regular-student cohort conflicts the same way a newly-scheduled session would. The easiest way to build one: optimize a schedule on the <b>Optimize Schedule</b> tab first, then use its "📌 Export for Fixed Schedule" button — that file imports back in here with no changes needed. CSV import is the reliable option; only <b>Subject</b>, <b>Room</b>, <b>Day</b>, <b>Start</b>, and <b>End</b> are required — Type, Faculty, Program, Year Level, and Block are optional. A row whose Room doesn't match an existing room (Rooms tab) is skipped, since there'd be nothing real for it to lock in place.</p>
+      <div class="io-toolbar">
+        <button class="btn btn-sm btn-ghost" id="fixed-export-btn">⬇ Export CSV</button>
+        <button class="btn btn-sm btn-ghost" id="fixed-template-btn">📄 Download Template</button>
+        <button class="btn btn-sm btn-ghost" id="fixed-import-btn">⬆ Import CSV</button>
+        <input type="file" id="fixed-import-file" accept=".csv,text/csv" style="display:none;">
+        <button class="btn btn-sm btn-danger" id="fixed-clear-btn">Clear All</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Fixed Schedule</h2>
+      <p class="sub">Delete a single entry below, or Clear All above to start over. These stay separate from an optimized result — re-running "Optimize Scheduling" always keeps every entry here locked in place.</p>
+      <div id="fixed-schedule-list"></div>
+    </div>
+  </section>
+
   <!-- SCHEDULE TAB -->
   <section id="tab-schedule" class="tab-content">
     <div class="panel no-print">
       <h2>Optimize &amp; View Schedule</h2>
-      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. A room's <b>Room Type</b> (Rooms tab) is a hard constraint: a LEC-only or LAB-only room is never offered to the other subject type. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set, <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other).</p>
+      <p class="sub">Runs a genetic algorithm — a population of candidate schedules evolved over generations via selection, crossover, and mutation — to fit every class session into a conflict-free room/day/time/faculty slot. Hard constraints (never violated): a room's <b>Room Type</b> (Rooms tab) — a LEC-only or LAB-only room is never offered to the other subject type; a room's <b>Allowable Usage %</b> — never booked past its shared-usage cap; every entry in the <b>Fixed Schedule</b> tab, if any — locked in place before anything new is placed, so nothing new can double-book its room, faculty, or regular-student cohort. Where possible (best-effort, never at the cost of leaving a session unscheduled), it also prefers a room's manually-set <b>Priority Subjects</b> (Rooms tab), keeps Laboratory subjects within 7:30 AM–6:00 PM, discourages Friday sessions, gives each faculty member a free 10:30 AM–12:00 NN or 12:00 NN–1:30 PM break, and avoids large idle gaps in a faculty member's daily schedule (e.g. a 7:30 AM class then nothing again until 6 PM). <b>External Assignment</b> subjects skip the room/faculty match and only get their class hours placed (TBA/TBD). If a Target Semester is set (Prospectus tab), <b>regular-student conflicts</b> are also enforced — separately for each program's year level (a 4-year program's term has 4 independent year-level cohorts checked at once; different year levels never block each other) — and each program's own <b>Number of Blocks</b> below controls how many parallel sections of its subjects get scheduled.</p>
       <div class="sched-toolbar">
         <button class="btn btn-primary btn-lg" id="optimize-btn">⚡ Optimize Scheduling</button>
         <button class="btn btn-ghost" id="clear-schedule-btn">Clear Result</button>
         <span id="optimize-status" style="color:var(--text-dim);font-size:13px;"></span>
       </div>
       <div class="field" style="margin-top:12px;">
-        <label>Target Semester (loads every program's subjects &amp; avoids conflicts per program/year level)</label>
-        <select id="target-term-select" style="min-width:280px;">
-          <option value="">— none (no curriculum-conflict check) —</option>
-        </select>
-        <div id="target-term-hint" style="color:var(--text-dim);font-size:12px;margin-top:4px;"></div>
-      </div>
-      <div class="field" style="margin-top:12px;">
         <label>Number of Blocks</label>
-        <input type="number" id="global-blocks-input" min="1" value="1" style="width:80px;">
-        <div style="color:var(--text-dim);font-size:12px;margin-top:4px;">Multiplies every subject listed in the Subjects tab into that many independent, separately-scheduled sections (e.g. 3 blocks of each subject, each competing for its own room/day/time/faculty). Leave at 1 for a single section per subject.</div>
+        <div style="color:var(--text-dim);font-size:12px;margin-bottom:8px;">Multiplies a subject's sessions into that many independent, separately-scheduled sections (e.g. 2 blocks of a subject, each competing for its own room/day/time/faculty). Set per program below, based on what's uploaded in the Prospectus tab — a program with 2 parallel intake sections can have a different block count than one with just 1. Leave at 1 for a single section.</div>
+        <div id="blocks-by-program-list"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <label style="min-width:240px;font-weight:600;font-size:13px;">Default (no prospectus link)</label>
+          <input type="number" id="default-blocks-input" min="1" value="1" style="width:80px;">
+        </div>
       </div>
     </div>
 
@@ -282,12 +345,12 @@
           </div>
         </div>
         <div class="flow-arrow">↓</div>
-        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+        <div class="flow-step" role="button" tabindex="0" data-jump="prospectus">
           <div class="flow-num">2</div>
           <div class="flow-icon">🗓️</div>
           <div class="flow-body">
             <div class="flow-title">Select the Target Semester to be optimized</div>
-            <div class="flow-sub">Optimize Schedule tab</div>
+            <div class="flow-sub">Prospectus tab</div>
             <p>Pick First Semester / Second Semester / Summer Term — this auto-loads every uploaded program's courses for that term straight into the Subjects tab, and turns on regular-student conflict-checking (kept separate per program <i>and</i> year level). No prospectus uploaded? Add subjects by hand instead in the Subjects tab.</p>
           </div>
         </div>
@@ -322,23 +385,33 @@
           </div>
         </div>
         <div class="flow-arrow">↓</div>
-        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+        <div class="flow-step" role="button" tabindex="0" data-jump="fixed">
           <div class="flow-num">6</div>
-          <div class="flow-icon">⚡</div>
+          <div class="flow-icon">🔒</div>
           <div class="flow-body">
-            <div class="flow-title">Set Number of Blocks and run the optimization</div>
-            <div class="flow-sub">Optimize Schedule tab</div>
-            <p>Set <b>Number of Blocks</b> to how many parallel sections per subject/program you need considered (e.g. 3 blocks of every subject, each scheduled independently) — leave at 1 for a single section. Then click <b>⚡ Optimize Scheduling</b> and watch the genetic algorithm converge live.</p>
+            <div class="flow-title">Import a Fixed Schedule (optional)</div>
+            <div class="flow-sub">Fixed Schedule tab</div>
+            <p>Already have sessions decided ahead of time (e.g. carried over from last semester)? Import them here as a CSV — the optimizer treats every entry as locked in place: a hard constraint nothing new can double-book, on top of every other constraint. Nothing to import yet? Skip this step; you can always come back and add one after optimizing (see Step 8).</p>
           </div>
         </div>
         <div class="flow-arrow">↓</div>
         <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
           <div class="flow-num">7</div>
+          <div class="flow-icon">⚡</div>
+          <div class="flow-body">
+            <div class="flow-title">Set Number of Blocks and run the optimization</div>
+            <div class="flow-sub">Optimize Schedule tab</div>
+            <p>Set <b>Number of Blocks</b> for how many parallel sections each program needs — one input per uploaded program (e.g. 2 blocks for a program with 2 intake sections, 1 for another with just 1), plus a <b>Default</b> for subjects with no prospectus link. Leave at 1 for a single section. Then click <b>⚡ Optimize Scheduling</b> and watch the genetic algorithm converge live.</p>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step" role="button" tabindex="0" data-jump="schedule">
+          <div class="flow-num">8</div>
           <div class="flow-icon">📋</div>
           <div class="flow-body">
             <div class="flow-title">Review the results below</div>
             <div class="flow-sub">Optimize Schedule tab — Schedule Results section</div>
-            <p>Switch <b>View</b> between <b>Room Timetable</b>, <b>Faculty Schedule</b>, <b>Regular-Student Schedule</b>, and <b>List View</b> — pick the specific room/faculty member/cohort from the dropdown next to it. Anything unplaced appears under <b>Scheduling Conflicts</b> with a specific reason. Finish with <b>🖨 Print</b> or <b>⬇ Export CSV</b>.</p>
+            <p>Switch <b>View</b> between <b>Room Timetable</b>, <b>Faculty Schedule</b>, <b>Regular-Student Schedule</b>, and <b>List View</b> — pick the specific room/faculty member/cohort from the dropdown next to it. Anything unplaced appears under <b>Scheduling Conflicts</b> with a specific reason. Finish with <b>🖨 Print</b>, <b>⬇ Export CSV</b>, or <b>📌 Export for Fixed Schedule</b> to reuse this result as next semester's Fixed Schedule.</p>
           </div>
         </div>
       </div>
@@ -368,7 +441,15 @@
       </details>
       <details class="faq-item">
         <summary>Can I upload more than one degree program's prospectus?</summary>
-        <div>Yes — type a different Program Name before each upload. Courses are grouped and displayed by program in the Prospectus tab, and regular-student conflict-checking treats each program's own year level as an independent cohort, so different programs never block each other even when scheduled in the same run.</div>
+        <div>Yes — type a different Program Name before each upload (or before using "Add a Course Manually"). Courses are grouped and displayed as a separate block per program in the Prospectus tab, and regular-student conflict-checking treats each program's own year level as an independent cohort, so different programs never block each other even when scheduled in the same run.</div>
+      </details>
+      <details class="faq-item">
+        <summary>Do I have to upload a CSV or PDF to add a prospectus course?</summary>
+        <div>No — the <b>Add a Course Manually</b> block on the Prospectus tab adds one course at a time to whichever Program Name is entered, with no file needed. It's also how you start a brand-new program from scratch. Each already-uploaded program's block has its own "+ Add Course" button that jumps there with that program's name already filled in, so you can top up a program with a few extra courses without retyping its name or re-uploading a file. Manually-added courses follow the exact same Program + Year + Term + Code duplicate check as CSV/PDF import, and count toward the same regular-student conflict-checking as any other prospectus course.</div>
+      </details>
+      <details class="faq-item">
+        <summary>What's the difference between a Fixed Schedule and just optimizing every time?</summary>
+        <div>A Fixed Schedule entry is treated as already decided — the optimizer locks its room/day/time in place before considering anything new, so it can never be moved, replaced, or double-booked by a new session, and (when Faculty and/or Program + Year Level are set on that entry) it also blocks faculty and regular-student cohort conflicts the same way a newly-scheduled session would. Use it for sessions arranged outside this app, or to carry a previous semester's schedule forward as a starting point: optimize once, use <b>📌 Export for Fixed Schedule</b> on the results, then import that file next semester before optimizing again.</div>
       </details>
       <details class="faq-item">
         <summary>Why did a subject end up in "Scheduling Conflicts" instead of being scheduled?</summary>
@@ -437,6 +518,18 @@
   </div>
 </div>
 
+<!-- Priority Subjects Modal -->
+<div class="modal-backdrop" id="priority-modal-backdrop">
+  <div class="modal">
+    <h3 id="priority-modal-title">Priority Subjects</h3>
+    <p class="sub">Highlight which subjects should be preferred for this room whenever more than one room could host them (e.g. a Computer Laboratory kept for Programming subjects). Soft preference only — this room can still host other subjects, and a priority subject still falls back to another room if this one is unavailable or full. Leave nothing selected for no preference (the default).</p>
+    <select id="priority-subjects-select" multiple size="12" style="width:100%;"></select>
+    <div class="modal-close-row">
+      <button class="btn btn-ghost" id="priority-modal-done">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Optimization Progress / Convergence Modal -->
 <div class="modal-backdrop" id="ga-modal-backdrop">
   <div class="modal" id="ga-modal" style="max-width:640px;">
@@ -495,6 +588,6 @@
 </div>
 
 <script src="prospectus-pdf.js?v=2"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

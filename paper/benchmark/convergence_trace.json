@@ -1,0 +1,72 @@
+{
+  "trace": [
+    {
+      "generation": 1,
+      "fitness": 3999769,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 1,
+      "done": false
+    },
+    {
+      "generation": 2,
+      "fitness": 3999769,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 1,
+      "done": false
+    },
+    {
+      "generation": 3,
+      "fitness": 3999769,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 1,
+      "done": false
+    },
+    {
+      "generation": 4,
+      "fitness": 3999769,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 1,
+      "done": false
+    },
+    {
+      "generation": 5,
+      "fitness": 3999769,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 1,
+      "done": false
+    },
+    {
+      "generation": 6,
+      "fitness": 3999778,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 6,
+      "done": false
+    },
+    {
+      "generation": 7,
+      "fitness": 3999778,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 6,
+      "done": false
+    },
+    {
+      "generation": 7,
+      "fitness": 3999778,
+      "scheduledCount": 40,
+      "totalSessions": 40,
+      "gapScore": 6,
+      "done": true
+    }
+  ],
+  "final": {
+    "generationsRun": 7,
+    "populationSize": 150
+  }
+}
