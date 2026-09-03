@@ -1,0 +1,86 @@
+Program,Year,Term,CourseCode,CourseTitle,Units,LecHoursPerWeek,LabHoursPerWeek,
+BET-ELET,First Year,First Semester,GEC101,Understanding the Self,3,3,0,
+BET-ELET,First Year,First Semester,GEC103,The Contemporary World,3,3,0,
+BET-ELET,First Year,First Semester,GEC104,Mathematics in the Modern World,3,3,0,
+BET-ELET,First Year,First Semester,MAT039,Calculus for Engineering Technologists 1,3,3,0,
+BET-ELET,First Year,First Semester,FIL101,Wika at Kultura sa Mapayapang Lipunan,3,3,0,
+BET-ELET,First Year,First Semester,FPE101,Fundamentals of Peace Education,3,3,0,
+BET-ELET,First Year,First Semester,BET111.1,Computer-Aided Drafting Laboratory,1,0,3,
+BET-ELET,First Year,First Semester,BET113,Electricity,2,1,3,
+BET-ELET,First Year,First Semester,PED001,Exercise Prescription and Management,2,2,0,
+BET-ELET,First Year,First Semester,NST001,National Service Training Program 1,-3,3,0,
+BET-ELET,First Year,Second Semester,GEC105,Readings in Philippine History,3,3,0,3
+BET-ELET,First Year,Second Semester,GEC109,Life and Works of Rizal,3,3,0,3
+BET-ELET,First Year,Second Semester,HIS003,History of  Filipino Muslims and Indigenous Peoples of MINSUPALA,3,3,0,3
+BET-ELET,First Year,Second Semester,MAT040,Calculus for Engineering Technologists 2,3,3,0,3
+BET-ELET,First Year,Second Semester,BET117,Technology Awareness,2,2,0,2
+BET-ELET,First Year,Second Semester,EET110,Modern Electrical Instruments and Measurements,1,0,3,3
+BET-ELET,First Year,Second Semester,EET120,Electrical Circuits for Technologists 1,3,3,0,3
+BET-ELET,First Year,Second Semester,EET120.1,Electrical Circuits for Technologists 1 Laboratory,1,0,3,3
+BET-ELET,First Year,Second Semester,EET121,Electrical Wiring System 1,1,1,0,1
+BET-ELET,First Year,Second Semester,EET121.1,Electrical Wiring System 1 Laboratory,1,0,3,3
+BET-ELET,First Year,Second Semester,PED002,Dance/Martial Arts,2,2,0,2
+BET-ELET,First Year,Second Semester,NST002,National Service Training Program 2,-3,3,0,3
+BET-ELET,First Year,Summer Term,BET112,"Basic Safety, Health and Safety Engineering",3,3,0,3
+BET-ELET,Second Year,First Semester,GEC102,Purposive Communication,3,3,0,3
+BET-ELET,Second Year,First Semester,CHM018,Chemistry for Engineering Technologists,3,3,0,3
+BET-ELET,Second Year,First Semester,CHM018.1,Chemistry for Engineering Technologists Laboratory,1,0,3,3
+BET-ELET,Second Year,First Semester,BET120,Data Analysis,3,3,0,3
+BET-ELET,Second Year,First Semester,EET130,Electrical Circuits for Technologists 2,3,3,0,3
+BET-ELET,Second Year,First Semester,EET130.1,Electrical Circuits for Technologists 2 Laboratory,1,0,3,3
+BET-ELET,Second Year,First Semester,EET131,Electrical Wiring System 2,2,2,0,2
+BET-ELET,Second Year,First Semester,EET131.1,Electrical Wiring System 2 Laboratory,1,0,3,3
+BET-ELET,Second Year,First Semester,EET132,Electrical Machines 1,1,1,0,1
+BET-ELET,Second Year,First Semester,EET132.1,Electrical Machines 1 Laboratory,1,0,3,3
+BET-ELET,Second Year,First Semester,EET133,Electronic Circuits and Devices,3,3,0,3
+BET-ELET,Second Year,First Semester,EET133.1,Electronic Circuits and Devices Laboratory,1,0,3,3
+BET-ELET,Second Year,First Semester,PED003,Individual/Dual Sports/Traditional/Recreational Games,2,2,0,2
+BET-ELET,Second Year,Second Semester,GEC106,Art Appreciation,3,3,0,3
+BET-ELET,Second Year,Second Semester,PHY051,College Physics,3,3,0,3
+BET-ELET,Second Year,Second Semester,PHY051.1,College Physics Laboratory,1,0,3,3
+BET-ELET,Second Year,Second Semester,ENS191,Engineering Economy,3,3,0,3
+BET-ELET,Second Year,Second Semester,EET140,Secondary Distribution System,2,2,0,2
+BET-ELET,Second Year,Second Semester,EET140.1,Secondary Distribution System Laboratory,1,0,3,3
+BET-ELET,Second Year,Second Semester,EET141,Logic Circuits and Switching Theory,2,2,0,2
+BET-ELET,Second Year,Second Semester,EET141.1,Logic Circuits and Switching Theory Laboratory,1,0,3,3
+BET-ELET,Second Year,Second Semester,EET142,Electrical Machines 2,1,1,0,1
+BET-ELET,Second Year,Second Semester,EET142.1,Electrical Machines 2 Laboratory,1,0,3,3
+BET-ELET,Second Year,Second Semester,EET143,Industrial Electronics ,2,2,0,2
+BET-ELET,Second Year,Second Semester,EET143.1,Industrial Electronics Laboratory,1,0,3,3
+BET-ELET,Second Year,Second Semester,PED004,Team Sports,2,2,0,2
+BET-ELET,Third Year,First Semester,GEC107 ,Ethics ,3,3,0,3
+BET-ELET,Third Year,First Semester,FIL103,Inobasyon sa Wikang Filipino,3,3,0,3
+BET-ELET,Third Year,First Semester,ENS192,Engineering Management,3,3,0,3
+BET-ELET,Third Year,First Semester,BET119,Engineering Mechanics,3,3,0,3
+BET-ELET,Third Year,First Semester,EET150,"Power Generation, Transmission and Distribution",1,1,0,1
+BET-ELET,Third Year,First Semester,EET150.1,"Power Generation, Transmission and Distribution Laboratory",1,0,3,3
+BET-ELET,Third Year,First Semester,EET151,Electrical Preventive Maintenance and Repair,1,1,0,1
+BET-ELET,Third Year,First Semester,EET151.1,Electrical Preventive Maintenance and Repair Laboratory,1,0,3,3
+BET-ELET,Third Year,First Semester,EET152,Electrical Machines 3,1,1,0,1
+BET-ELET,Third Year,First Semester,EET152.1,Electrical Machines 3 Laboratory,1,0,3,3
+BET-ELET,Third Year,First Semester,EET153,Programmable Logic Controller,3,3,0,3
+BET-ELET,Third Year,First Semester,EET153.1,Programmable Logic Controller Laboratory,1,0,3,3
+BET-ELET,Third Year,First Semester,BMT110,Basic Thermodynamics,2,2,0,2
+BET-ELET,Third Year,Second Semester,BMT130,Fluid Mechanics,2,2,0,2
+BET-ELET,Third Year,Second Semester,EEE192,"EE Laws, Codes, and Professional Ethics",2,2,0,2
+BET-ELET,Third Year,Second Semester,GEC108,"Science, Technology and Society",3,3,0,3
+BET-ELET,Third Year,Second Semester,BET118.1,Computer Applications Laboratory,1,0,3,3
+BET-ELET,Third Year,Second Semester,BET198,Research Methods,3,2,3,5
+BET-ELET,Third Year,Second Semester,EET160,Motor Control,3,3,0,3
+BET-ELET,Third Year,Second Semester,EET160.1,Motor Control Laboratory,1,0,3,3
+BET-ELET,Third Year,Second Semester,EET161,Microprocessor Systems,2,2,0,2
+BET-ELET,Third Year,Second Semester,EET161.1,Microprocessor Systems Laboratory,1,0,3,3
+BET-ELET,Third Year,Second Semester,EET162,Fundamental of Electronics Communication,3,3,0,3
+BET-ELET,Third Year,Second Semester,BET116,Technical Writing,3,3,0,3
+BET-ELET,Fourth Year,First Semester,ENS 193,Technopreneurship for Engineers and Technologists,3,3,0,3
+BET-ELET,Fourth Year,First Semester,BET195,Environmental Sciences & Engineering with Safety,3,3,0,3
+BET-ELET,Fourth Year,First Semester,EET199,Undergraduate Thesis,3,1,6,7
+BET-ELET,Fourth Year,First Semester,EET170,Electro-pneumatics,3,3,0,3
+BET-ELET,Fourth Year,First Semester,EET170.1,Electro-pneumatics Laboratory,1,0,3,3
+BET-ELET,Fourth Year,First Semester,EET171,Instrumentation and Control,3,3,0,3
+BET-ELET,Fourth Year,First Semester,EET171.1,Instrumentation and Control Laboratory,1,0,3,3
+BET-ELET,Fourth Year,First Semester,EET172,Auxiliary System,1,1,0,1
+BET-ELET,Fourth Year,First Semester,EET172.1,Auxiliary System Laboratory,1,0,3,3
+BET-ELET,Fourth Year,First Semester,EET173,Marine Electrical Equipment,2,2,0,2
+BET-ELET,Fourth Year,First Semester,EET174,Electro Transport Technology,2,2,0,2
+BET-ELET,Fourth Year,Second Semester,EET197,On-the-Job Training,12,0,40,40
